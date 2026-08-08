@@ -142,6 +142,21 @@ xcodebuild \
   CODE_SIGN_STYLE=Automatic \
   archive
 
+# SPM sometimes embeds a ~50KB Mobile.framework stub (MinimumOSVersion 100).
+# Mobile symbols are statically linked into the app/appex, but replace the stub
+# with the real ios-arm64 slice so dyld never loads a placeholder.
+REAL_MOBILE="$APPLE_DIR/Frameworks/Mobile.xcframework/ios-arm64/Mobile.framework/Mobile"
+EMBEDDED_MOBILE="$ARCHIVE_PATH/Products/Applications/Cockney.app/Frameworks/Mobile.framework/Mobile"
+if [[ -f "$REAL_MOBILE" && -f "$EMBEDDED_MOBILE" ]]; then
+  EMBEDDED_SIZE="$(wc -c < "$EMBEDDED_MOBILE" | tr -d ' ')"
+  REAL_SIZE="$(wc -c < "$REAL_MOBILE" | tr -d ' ')"
+  if [[ "$EMBEDDED_SIZE" -lt 1000000 && "$REAL_SIZE" -gt 1000000 ]]; then
+    echo "Replacing stub Mobile.framework ($EMBEDDED_SIZE bytes) with real ios-arm64 ($REAL_SIZE bytes)"
+    cp "$REAL_MOBILE" "$EMBEDDED_MOBILE"
+    # exportArchive re-signs the app bundle; do not ad-hoc sign here.
+  fi
+fi
+
 cat > "$EXPORT_OPTIONS" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"

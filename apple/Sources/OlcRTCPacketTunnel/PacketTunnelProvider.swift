@@ -3,6 +3,7 @@ import Foundation
 import NetworkExtension
 import OlcRTCClientKit
 import Tun2SocksKit
+import Tun2SocksKitC
 
 final class PacketTunnelProvider: NEPacketTunnelProvider {
     private enum Constants {
@@ -34,7 +35,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private var engine: GomobileOlcRTCEngine?
     private var tun2socksTask: Task<Void, Never>?
     private var tun2socksStatsTask: Task<Void, Never>?
+    private var tun2socksLogTask: Task<Void, Never>?
     private var configFileURL: URL?
+    private var tun2socksLogURL: URL?
     private var eventTask: Task<Void, Never>?
 
     override func startTunnel(
@@ -42,20 +45,29 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         completionHandler: @escaping (Error?) -> Void
     ) {
         Task {
+            // Log before config parse — otherwise a missing keyHex/endpoint leaves shared.log empty.
+            let proto = protocolConfiguration as? NETunnelProviderProtocol
+            let persisted = proto?.providerConfiguration ?? [:]
+            let startKeys = Set((options ?? [:]).keys)
+            let persistedKeys = Set(persisted.keys)
+            DiagnosticJournal.shared.configureSession(
+                sessionId: UUID(),
+                mode: "packetTunnel",
+                deviceId: "pending"
+            )
+            log(
+                "checkpoint: VPN extension startTunnel appGroup=\(DiagnosticJournal.isAppGroupAvailable() ? "ok" : "MISSING") path=\(DiagnosticJournal.shared.diagnosticsDirectoryPath()) startOpts=\(startKeys.sorted().joined(separator: ",")) persisted=\(persistedKeys.sorted().joined(separator: ","))",
+                level: .checkpoint
+            )
             do {
                 let configuration = try PacketTunnelConfiguration(
-                    providerConfiguration: (protocolConfiguration as? NETunnelProviderProtocol)?.providerConfiguration,
+                    providerConfiguration: persisted,
                     startOptions: options
                 )
-                let sessionId = UUID()
                 DiagnosticJournal.shared.configureSession(
-                    sessionId: sessionId,
+                    sessionId: DiagnosticJournal.shared.currentSessionId() ?? UUID(),
                     mode: "packetTunnel",
                     deviceId: configuration.connectionProfile.clientID
-                )
-                log(
-                    "checkpoint: VPN extension startTunnel appGroup=\(DiagnosticJournal.isAppGroupAvailable() ? "ok" : "MISSING") path=\(DiagnosticJournal.shared.diagnosticsDirectoryPath())",
-                    level: .checkpoint
                 )
                 try await startOlcRTC(configuration: configuration)
                 log("checkpoint: WaitReady ok — applying tunnel settings", level: .checkpoint)
@@ -107,7 +119,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         observeEngine(engine)
 
         log(
-            "checkpoint: MobileStart carrier=\(startOptions.carrierName) transport=\(startOptions.transportName) room=\(startOptions.roomID) socks=\(startOptions.socksPort) jwt=\(startOptions.accessToken.isEmpty ? "missing" : "present") carrierAuth=\(startOptions.carrierAuthToken.isEmpty ? "missing" : "present")",
+            "checkpoint: MobileStart carrier=\(startOptions.carrierName) transport=\(startOptions.transportName) room=\(startOptions.roomID) socks=\(startOptions.socksPort) endpoint=\(startOptions.turnEndpoint.isEmpty ? "missing" : startOptions.turnEndpoint) jwt=\(startOptions.accessToken.isEmpty ? "no" : "yes") carrierAuth=\(startOptions.carrierAuthToken.isEmpty ? "no" : "yes")",
             level: .checkpoint
         )
         try await engine.start(options: startOptions)
@@ -267,11 +279,60 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
+    /// Tun2SocksKit picks the first `utun_control` descriptor it finds by scanning fds.
+    /// When the extension holds more than one, it can bind to an interface the system
+    /// never routes packets to, which looks exactly like a dead tunnel.
+    private func logUtunDescriptors() {
+        var ctlInfo = ctl_info()
+        withUnsafeMutablePointer(to: &ctlInfo.ctl_name) {
+            $0.withMemoryRebound(to: CChar.self, capacity: MemoryLayout.size(ofValue: $0.pointee)) {
+                _ = strcpy($0, "com.apple.net.utun_control")
+            }
+        }
+
+        var found: [String] = []
+        for fd: Int32 in 0...1024 {
+            var addr = sockaddr_ctl()
+            var ret: Int32 = -1
+            var len = socklen_t(MemoryLayout.size(ofValue: addr))
+            withUnsafeMutablePointer(to: &addr) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    ret = getpeername(fd, $0, &len)
+                }
+            }
+            if ret != 0 || addr.sc_family != AF_SYSTEM {
+                continue
+            }
+            if ctlInfo.ctl_id == 0, ioctl(fd, CTLIOCGINFO, &ctlInfo) != 0 {
+                continue
+            }
+            guard addr.sc_id == ctlInfo.ctl_id else { continue }
+
+            var name = [CChar](repeating: 0, count: Int(IFNAMSIZ))
+            var nameLen = socklen_t(IFNAMSIZ)
+            // SYSPROTO_CONTROL / UTUN_OPT_IFNAME are not surfaced by the iOS Darwin module.
+            let named = getsockopt(fd, 2, 2, &name, &nameLen) == 0
+            found.append("fd=\(fd)/\(named ? String(cString: name) : "?")")
+        }
+
+        log(
+            "checkpoint: utun descriptors count=\(found.count) [\(found.joined(separator: " "))]",
+            level: .checkpoint
+        )
+    }
+
     private func startTun2Socks(configuration: PacketTunnelConfiguration) async {
+        logUtunDescriptors()
         let socksPort = await engine?.activeSocksPort ?? configuration.socksPort
+        let logURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("olcrtc-tun2socks.log")
+        try? FileManager.default.removeItem(at: logURL)
+        FileManager.default.createFile(atPath: logURL.path, contents: nil)
+        tun2socksLogURL = logURL
         let configText = tun2socksConfiguration(
             socksPort: socksPort,
-            debugLogging: configuration.debugLogging
+            debugLogging: configuration.debugLogging,
+            logPath: logURL.path
         )
         let fileURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("olcrtc-tun2socks.yml")
@@ -312,6 +373,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             if earlyExit == nil {
                 log("checkpoint: tun2socks running attempt=\(attempt)", level: .checkpoint)
                 startTun2SocksStatsProbe()
+                startTun2SocksLogProbe()
                 return
             }
 
@@ -342,11 +404,35 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
+    private func startTun2SocksLogProbe() {
+        guard let logURL = tun2socksLogURL else { return }
+        tun2socksLogTask?.cancel()
+        tun2socksLogTask = Task { [weak self] in
+            var offset: UInt64 = 0
+            while !Task.isCancelled {
+                if let handle = try? FileHandle(forReadingFrom: logURL) {
+                    try? handle.seek(toOffset: offset)
+                    let data = (try? handle.readToEnd()) ?? Data()
+                    offset += UInt64(data.count)
+                    try? handle.close()
+                    if let text = String(data: data, encoding: .utf8) {
+                        for line in text.split(separator: "\n") where !line.isEmpty {
+                            self?.log("tun2socks: \(line)", level: .info)
+                        }
+                    }
+                }
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+        }
+    }
+
     private func stopRuntime() async {
         eventTask?.cancel()
         eventTask = nil
         tun2socksStatsTask?.cancel()
         tun2socksStatsTask = nil
+        tun2socksLogTask?.cancel()
+        tun2socksLogTask = nil
         tun2socksTask?.cancel()
         tun2socksTask = nil
         Socks5Tunnel.quit()
@@ -354,6 +440,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         if let configFileURL {
             try? FileManager.default.removeItem(at: configFileURL)
             self.configFileURL = nil
+        }
+
+        if let tun2socksLogURL {
+            try? FileManager.default.removeItem(at: tun2socksLogURL)
+            self.tun2socksLogURL = nil
         }
 
         await engine?.stop()
@@ -367,7 +458,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private func tun2socksConfiguration(
         socksPort: Int,
-        debugLogging: Bool
+        debugLogging: Bool,
+        logPath: String
     ) -> String {
         """
         tunnel:
@@ -389,8 +481,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
           connect-timeout: 10000
           tcp-read-write-timeout: 300000
           udp-read-write-timeout: 60000
-          log-file: stderr
-          log-level: \(debugLogging ? "debug" : "warn")
+          log-file: \(logPath)
+          log-level: \(debugLogging ? "debug" : "info")
           limit-nofile: 65535
         """
     }

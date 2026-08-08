@@ -499,7 +499,7 @@ public final class ClientViewModel: ObservableObject {
                 }
                 let expires = profileToStart.subscription?.accessExpiresAtUtc ?? "unknown"
                 appendLog(
-                    "checkpoint: profile applied device=\(profileToStart.clientID) expires=\(expires) jwt=\(profileToStart.accessToken.isEmpty ? "missing" : "present") carrierAuth=\(profileToStart.carrierAuthToken.isEmpty ? "missing" : "present")",
+                    "checkpoint: profile applied device=\(profileToStart.clientID) transport=\(profileToStart.transport.rawValue) endpoint=\(profileToStart.turnEndpoint.isEmpty ? "missing" : profileToStart.turnEndpoint) expires=\(expires) jwt=\(profileToStart.accessToken.isEmpty ? "no" : "yes") carrierAuth=\(profileToStart.carrierAuthToken.isEmpty ? "no" : "yes")",
                     level: .checkpoint
                 )
                 if let validationMessage = validate(profile: profileToStart) {
@@ -1439,7 +1439,14 @@ public final class ClientViewModel: ObservableObject {
                     AppLocalization.format("Could not start VPN: %@", vpnStartFailureMessage(error)),
                     level: .error
                 )
-                await packetTunnelManager.stop()            }
+                // Extension may have written failure details to the App Group before dying.
+                // Give the provider a beat to flush shared.log, then enqueue for upload.
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                DiagnosticJournal.shared.mergeSharedLogIntoUI(enqueuePending: true)
+                logs = DiagnosticJournal.shared.recentUILines()
+                await packetTunnelManager.stop()
+                await uploadLogsToServer()
+            }
         }
     }
 

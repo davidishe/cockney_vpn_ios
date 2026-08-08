@@ -155,9 +155,12 @@ public final class PacketTunnelManager {
         let timeout = UInt64(max(timeoutMillis, 10_000)) * 1_000_000
         let startedAt = ContinuousClock.now
         let deadline = startedAt.advanced(by: .nanoseconds(timeout))
-        let disconnectedGraceDeadline = startedAt.advanced(by: .seconds(5))
+        // turnrelay WaitReady (VK TURN allocate + KCP) often needs >>5s; only treat
+        // lingering .disconnected as failure after a longer grace.
+        let disconnectedGraceDeadline = startedAt.advanced(by: .seconds(45))
         var lastStatus: NEVPNStatus?
         var sawConnectionAttempt = false
+        var sawDisconnectedAfterAttempt = false
 
         while ContinuousClock.now < deadline {
             let status = connection.status
@@ -172,12 +175,30 @@ public final class PacketTunnelManager {
             case .invalid:
                 throw PacketTunnelManagerError.providerBundleIdentifierMissing
             case .disconnected:
-                if sawConnectionAttempt || ContinuousClock.now >= disconnectedGraceDeadline {
+                if sawConnectionAttempt {
+                    // Extension may bounce through disconnecting→disconnected while
+                    // reporting startTunnel failure; give shared.log a moment to flush.
+                    if !sawDisconnectedAfterAttempt {
+                        sawDisconnectedAfterAttempt = true
+                        await eventHandler?("iOS VPN disconnected after connect attempt — waiting briefly for extension logs.")
+                        try await Task.sleep(nanoseconds: 1_500_000_000)
+                        if connection.status == .connected {
+                            return
+                        }
+                        if connection.status == .connecting || connection.status == .reasserting {
+                            sawDisconnectedAfterAttempt = false
+                            break
+                        }
+                    }
+                    throw PacketTunnelManagerError.providerDisconnected
+                }
+                if ContinuousClock.now >= disconnectedGraceDeadline {
                     throw PacketTunnelManagerError.providerDisconnected
                 }
             case .disconnecting:
                 if sawConnectionAttempt {
-                    throw PacketTunnelManagerError.providerDisconnected
+                    // Wait for terminal .disconnected (or a reconnect) instead of failing immediately.
+                    break
                 }
             case .connecting, .reasserting:
                 sawConnectionAttempt = true

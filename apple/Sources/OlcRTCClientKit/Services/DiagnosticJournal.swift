@@ -226,9 +226,11 @@ public final class DiagnosticJournal: @unchecked Sendable {
         queue.sync { deviceId }
     }
 
-    public func mergeSharedLogIntoUI() {
+    /// Pull App Group `shared.log` into the on-screen journal.
+    /// - Parameter enqueuePending: when true (default), merged lines are queued for server upload.
+    public func mergeSharedLogIntoUI(enqueuePending: Bool = true) {
         queue.sync {
-            mergeSharedLogLocked(enqueuePending: false)
+            mergeSharedLogLocked(enqueuePending: enqueuePending)
         }
     }
 

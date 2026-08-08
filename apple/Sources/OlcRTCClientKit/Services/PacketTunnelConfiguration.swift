@@ -23,6 +23,7 @@ public struct PacketTunnelConfiguration: Equatable {
         static let keyHex = "keyHex"
         static let accessToken = "accessToken"
         static let carrierAuthToken = "carrierAuthToken"
+        static let turnEndpoint = "turnEndpoint"
         static let socksPort = "socksPort"
         static let socksUser = "socksUser"
         static let socksPass = "socksPass"
@@ -54,6 +55,7 @@ public struct PacketTunnelConfiguration: Equatable {
     public var keyHex: String
     public var accessToken: String
     public var carrierAuthToken: String
+    public var turnEndpoint: String
     public var socksPort: Int
     public var socksUser: String
     public var socksPass: String
@@ -85,6 +87,7 @@ public struct PacketTunnelConfiguration: Equatable {
         keyHex = profile.keyHex
         accessToken = profile.accessToken
         carrierAuthToken = profile.carrierAuthToken
+        turnEndpoint = profile.turnEndpoint
         socksPort = profile.socksPort
         socksUser = profile.socksUser
         socksPass = profile.socksPass
@@ -122,6 +125,7 @@ public struct PacketTunnelConfiguration: Equatable {
         keyHex = try Self.stringValue(Key.keyHex, from: values)
         accessToken = Self.optionalStringValue(Key.accessToken, from: values)
         carrierAuthToken = Self.optionalStringValue(Key.carrierAuthToken, from: values)
+        turnEndpoint = Self.optionalStringValue(Key.turnEndpoint, from: values)
         socksPort = try Self.intValue(Key.socksPort, from: values)
         socksUser = Self.optionalStringValue(Key.socksUser, from: values)
         socksPass = Self.optionalStringValue(Key.socksPass, from: values)
@@ -160,6 +164,7 @@ public struct PacketTunnelConfiguration: Equatable {
             Key.keyHex: keyHex as NSString,
             Key.accessToken: accessToken as NSString,
             Key.carrierAuthToken: carrierAuthToken as NSString,
+            Key.turnEndpoint: turnEndpoint as NSString,
             Key.socksPort: socksPort as NSNumber,
             Key.socksUser: socksUser as NSString,
             Key.socksPass: socksPass as NSString,
@@ -185,33 +190,11 @@ public struct PacketTunnelConfiguration: Equatable {
         ]
     }
 
+    /// Persisted on the NE manager. Must include secrets + turnEndpoint: iOS does not
+    /// always deliver `startVPNTunnel(options:)` into the extension (and system restarts
+    /// never do). Without keyHex/endpoint the tunnel dies before any useful log line.
     public var providerMetadata: [String: NSObject] {
-        [
-            Key.carrierName: carrierName as NSString,
-            Key.transportName: transportName as NSString,
-            Key.roomID: roomID as NSString,
-            Key.clientID: clientID as NSString,
-            Key.socksPort: socksPort as NSNumber,
-            Key.dnsServer: dnsServer as NSString,
-            Key.debugLogging: debugLogging as NSNumber,
-            Key.vp8FPS: vp8FPS as NSNumber,
-            Key.vp8BatchSize: vp8BatchSize as NSNumber,
-            Key.seiFPS: seiFPS as NSNumber,
-            Key.seiBatchSize: seiBatchSize as NSNumber,
-            Key.seiFragmentSize: seiFragmentSize as NSNumber,
-            Key.seiAckTimeoutMillis: seiAckTimeoutMillis as NSNumber,
-            Key.videoCodec: videoCodec as NSString,
-            Key.videoWidth: videoWidth as NSNumber,
-            Key.videoHeight: videoHeight as NSNumber,
-            Key.videoFPS: videoFPS as NSNumber,
-            Key.videoBitrate: videoBitrate as NSString,
-            Key.videoHardwareAcceleration: videoHardwareAcceleration as NSString,
-            Key.videoQRRecovery: videoQRRecovery as NSString,
-            Key.videoQRSize: videoQRSize as NSNumber,
-            Key.videoTileModule: videoTileModule as NSNumber,
-            Key.videoTileRS: videoTileRS as NSNumber,
-            Key.startTimeoutMillis: startTimeoutMillis as NSNumber,
-        ]
+        providerConfiguration
     }
 
     public var connectionProfile: ConnectionProfile {
@@ -245,7 +228,8 @@ public struct PacketTunnelConfiguration: Equatable {
             videoQRSize: videoQRSize,
             videoTileModule: videoTileModule,
             videoTileRS: videoTileRS,
-            startTimeoutMillis: startTimeoutMillis
+            startTimeoutMillis: startTimeoutMillis,
+            turnEndpoint: turnEndpoint
         )
     }
 
