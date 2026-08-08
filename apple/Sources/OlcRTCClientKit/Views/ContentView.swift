@@ -152,9 +152,7 @@ public struct ContentView: View {
             ProfileSettingsScreen(viewModel: viewModel)
         }
         .logPresentation(isPresented: $isShowingLogs) {
-            LogScreen(logs: viewModel.logs) {
-                viewModel.clearLogs()
-            }
+            LogScreen(viewModel: viewModel)
         }
         .overlay(alignment: .top) {
             if let message = viewModel.importErrorMessage {
@@ -355,13 +353,6 @@ private struct ProfileSettingsScreen: View {
                     Toggle("Направлять системный трафик через VPN", isOn: $viewModel.useSystemProxy)
                 }
                 #endif
-
-                Section("Диагностика") {
-                    Toggle("Отправлять диагностику", isOn: $viewModel.sendDiagnostics)
-                    Text("Журнал периодически уходит на сервер Cockney (без секретов).")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
 
                 Section("Запуск") {
                     TextField("DNS-сервер", text: $viewModel.draft.dnsServer)
@@ -1614,12 +1605,21 @@ private final class SubscriptionSourceCenteredTextFieldCell: NSTextFieldCell {
 
 private struct LogScreen: View {
     @Environment(\.dismiss) private var dismiss
-    let logs: [String]
-    let onClear: () -> Void
+    @ObservedObject var viewModel: ClientViewModel
 
     var body: some View {
         NavigationStack {
-            LogView(logs: logs, onClear: onClear)
+            LogView(
+                logs: viewModel.logs,
+                isUploading: viewModel.isUploadingLogs,
+                uploadErrorMessage: viewModel.logUploadErrorMessage,
+                onClear: { viewModel.clearLogs() },
+                onUpload: {
+                    Task { await viewModel.uploadLogsToServer() }
+                },
+                onRefresh: { viewModel.refreshDiagnosticLogs() },
+                onDismissUploadError: { viewModel.clearLogUploadError() }
+            )
                 .navigationTitle("Журнал")
                 #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)

@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import NetworkExtension
 import OlcRTCClientKit
@@ -13,8 +14,26 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         static let mtu = 8500
     }
 
+    private final class Tun2SocksLaunchState: @unchecked Sendable {
+        private let lock = NSLock()
+        private var exitCode: Int32?
+
+        func setExit(_ code: Int32) {
+            lock.lock()
+            exitCode = code
+            lock.unlock()
+        }
+
+        func getExit() -> Int32? {
+            lock.lock()
+            defer { lock.unlock() }
+            return exitCode
+        }
+    }
+
     private var engine: GomobileOlcRTCEngine?
     private var tun2socksTask: Task<Void, Never>?
+    private var tun2socksStatsTask: Task<Void, Never>?
     private var configFileURL: URL?
     private var eventTask: Task<Void, Never>?
 
@@ -34,19 +53,20 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                     mode: "packetTunnel",
                     deviceId: configuration.connectionProfile.clientID
                 )
-                log("checkpoint: VPN extension startTunnel", level: .checkpoint)
+                log(
+                    "checkpoint: VPN extension startTunnel appGroup=\(DiagnosticJournal.isAppGroupAvailable() ? "ok" : "MISSING") path=\(DiagnosticJournal.shared.diagnosticsDirectoryPath())",
+                    level: .checkpoint
+                )
                 try await startOlcRTC(configuration: configuration)
                 log("checkpoint: WaitReady ok — applying tunnel settings", level: .checkpoint)
-                try await applyNetworkSettings()
+                try await applyNetworkSettings(configuration: configuration)
                 log("checkpoint: tunnel settings applied addr=\(Constants.tunnelAddress)", level: .checkpoint)
-                try await startTun2Socks(configuration: configuration)
-                log("checkpoint: tun2socks started", level: .checkpoint)
-                startDiagnosticsUpload(configuration: configuration, sessionId: sessionId)
+                // utun fd from NetworkExtension is sometimes not visible for a beat.
+                try await Task.sleep(nanoseconds: 300_000_000)
+                await startTun2Socks(configuration: configuration)
                 completionHandler(nil)
             } catch {
                 log("checkpoint: VPN start failed \(error.localizedDescription)", level: .error)
-                startDiagnosticsUpload(configuration: configurationIfPossible(options: options), sessionId: UUID())
-                DiagnosticLogUploader.shared.uploadNow(reason: "tunnel_start_failed")
                 completionHandler(error)
                 await stopRuntime()
             }
@@ -59,42 +79,24 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     ) {
         Task {
             log("checkpoint: VPN extension stopTunnel reason=\(reason.rawValue)", level: .checkpoint)
-            DiagnosticLogUploader.shared.uploadNow(reason: "tunnel_stop")
-            DiagnosticLogUploader.shared.stopPeriodicUpload()
-            // Give the last upload a moment before tearing down networking.
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
             await stopRuntime()
             completionHandler()
         }
     }
 
-    private func configurationIfPossible(options: [String: NSObject]?) -> PacketTunnelConfiguration? {
-        try? PacketTunnelConfiguration(
-            providerConfiguration: (protocolConfiguration as? NETunnelProviderProtocol)?.providerConfiguration,
-            startOptions: options
-        )
-    }
-
-    private func startDiagnosticsUpload(configuration: PacketTunnelConfiguration?, sessionId: UUID) {
-        guard let configuration else { return }
-        let profile = configuration.connectionProfile
-        DiagnosticJournal.shared.configureSession(
-            sessionId: sessionId,
-            mode: "packetTunnel",
-            deviceId: profile.clientID
-        )
-        DiagnosticLogUploader.shared.updateContext(
-            DiagnosticLogUploader.makeContext(
-                accessToken: profile.accessToken,
-                deviceId: profile.clientID,
-                sessionId: sessionId,
-                mode: "packetTunnel",
-                subscriptionURL: nil
-            )
-        )
-        DiagnosticLogUploader.shared.setEnabled(true)
-        DiagnosticLogUploader.shared.startPeriodicUpload(intervalSeconds: 30)
-        DiagnosticLogUploader.shared.uploadNow(reason: "tunnel_start")
+    override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)? = nil) {
+        let command = String(data: messageData, encoding: .utf8) ?? ""
+        switch command {
+        case "dump-logs":
+            let lines = DiagnosticJournal.shared.exportDisplayLines(limit: 800)
+            let header = [
+                "checkpoint: tunnel-ipc dump appGroup=\(DiagnosticJournal.isAppGroupAvailable() ? "ok" : "MISSING") path=\(DiagnosticJournal.shared.diagnosticsDirectoryPath()) lines=\(lines.count)",
+            ]
+            let body = (header + lines).joined(separator: "\n")
+            completionHandler?(Data(body.utf8))
+        default:
+            completionHandler?(nil)
+        }
     }
 
     private func startOlcRTC(configuration: PacketTunnelConfiguration) async throws {
@@ -126,7 +128,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
-    private func applyNetworkSettings() async throws {
+    private func applyNetworkSettings(configuration: PacketTunnelConfiguration) async throws {
         let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: Constants.tunnelAddress)
         settings.mtu = Constants.mtu as NSNumber
 
@@ -135,9 +137,33 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             subnetMasks: [Constants.tunnelSubnetMask]
         )
         ipv4Settings.includedRoutes = [NEIPv4Route.default()]
-        ipv4Settings.excludedRoutes = [
+        var excluded: [NEIPv4Route] = [
             NEIPv4Route(destinationAddress: "127.0.0.0", subnetMask: "255.0.0.0"),
         ]
+        // Keep Cockney control-plane HTTPS off-tunnel (subscription + log upload).
+        let controlHosts = controlPlaneHosts(from: configuration)
+        for host in controlHosts {
+            for ip in await resolveIPv4Addresses(host: host) {
+                excluded.append(NEIPv4Route(destinationAddress: ip, subnetMask: "255.255.255.255"))
+                log("checkpoint: exclude control-plane route \(host) → \(ip)", level: .checkpoint)
+            }
+        }
+        // Keep VK Calls / olcRTC media off-tunnel. If these go into TUN, ICE/WebRTC
+        // self-eats (sendto: can't assign requested address) and sites never get SOCKS streams.
+        for route in carrierMediaBypassRoutes() {
+            excluded.append(route)
+            log(
+                "checkpoint: exclude carrier-media route \(route.destinationAddress)/\(route.destinationSubnetMask ?? "?")",
+                level: .checkpoint
+            )
+        }
+        for host in carrierMediaHosts() {
+            for ip in await resolveIPv4Addresses(host: host) {
+                excluded.append(NEIPv4Route(destinationAddress: ip, subnetMask: "255.255.255.255"))
+                log("checkpoint: exclude carrier-media host \(host) → \(ip)", level: .checkpoint)
+            }
+        }
+        ipv4Settings.excludedRoutes = excluded
         settings.ipv4Settings = ipv4Settings
 
         let dnsSettings = NEDNSSettings(servers: [Constants.mapDNSAddress])
@@ -155,25 +181,166 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
-    private func startTun2Socks(configuration: PacketTunnelConfiguration) async throws {
+    private func controlPlaneHosts(from configuration: PacketTunnelConfiguration) -> [String] {
+        var hosts: [String] = ["cockney.tokenova.space"]
+        if let raw = configuration.connectionProfile.subscription?.sourceURL,
+           let url = URL(string: raw),
+           let host = url.host,
+           !host.isEmpty {
+            hosts.append(host)
+        }
+        return Array(Set(hosts))
+    }
+
+    /// Hard-coded media/egress prefixes seen in production ICE (NL agent + VK TURN).
+    private func carrierMediaBypassRoutes() -> [NEIPv4Route] {
+        [
+            // NL olcRTC agent (host candidates in ICE)
+            NEIPv4Route(destinationAddress: "195.133.81.165", subnetMask: "255.255.255.255"),
+            // VK TURN / relay pool observed in client logs
+            NEIPv4Route(destinationAddress: "90.156.236.0", subnetMask: "255.255.255.0"),
+        ]
+    }
+
+    private func carrierMediaHosts() -> [String] {
+        [
+            "api.vk.com",
+            "login.vk.com",
+            "queuev4.vk.com",
+            "stun.vk.com",
+            "turn.vk.com",
+        ]
+    }
+
+    private func resolveIPv4Addresses(host: String) async -> [String] {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                var hints = addrinfo(
+                    ai_flags: AI_ADDRCONFIG,
+                    ai_family: AF_INET,
+                    ai_socktype: SOCK_STREAM,
+                    ai_protocol: 0,
+                    ai_addrlen: 0,
+                    ai_canonname: nil,
+                    ai_addr: nil,
+                    ai_next: nil
+                )
+                var result: UnsafeMutablePointer<addrinfo>?
+                let status = getaddrinfo(host, nil, &hints, &result)
+                defer {
+                    if let result {
+                        freeaddrinfo(result)
+                    }
+                }
+                guard status == 0, let first = result else {
+                    continuation.resume(returning: [])
+                    return
+                }
+                var addresses: [String] = []
+                var pointer: UnsafeMutablePointer<addrinfo>? = first
+                while let info = pointer {
+                    if info.pointee.ai_family == AF_INET,
+                       let addr = info.pointee.ai_addr {
+                        var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                        if getnameinfo(
+                            addr,
+                            socklen_t(info.pointee.ai_addrlen),
+                            &hostname,
+                            socklen_t(hostname.count),
+                            nil,
+                            0,
+                            NI_NUMERICHOST
+                        ) == 0 {
+                            addresses.append(String(cString: hostname))
+                        }
+                    }
+                    pointer = info.pointee.ai_next
+                }
+                continuation.resume(returning: Array(Set(addresses)))
+            }
+        }
+    }
+
+    private func startTun2Socks(configuration: PacketTunnelConfiguration) async {
         let socksPort = await engine?.activeSocksPort ?? configuration.socksPort
-        let fileURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("olcrtc-tun2socks.yml")
-        try tun2socksConfiguration(
+        let configText = tun2socksConfiguration(
             socksPort: socksPort,
             debugLogging: configuration.debugLogging
-        ).write(to: fileURL, atomically: true, encoding: .utf8)
-        configFileURL = fileURL
+        )
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("olcrtc-tun2socks.yml")
+        do {
+            try configText.write(to: fileURL, atomically: true, encoding: .utf8)
+            configFileURL = fileURL
+        } catch {
+            log("checkpoint: tun2socks config write failed \(error.localizedDescription)", level: .error)
+        }
         log("checkpoint: tun2socks config socks=127.0.0.1:\(socksPort)", level: .checkpoint)
 
-        tun2socksTask = Task.detached(priority: .userInitiated) {
-            _ = Socks5Tunnel.run(withConfig: .file(path: fileURL))
+        // Socks5Tunnel.run returns -1 immediately if the utun fd is not visible yet.
+        // Do NOT fail the whole VPN for that — keep control-plane Connected and surface the code.
+        var lastCode: Int32 = -1
+        for attempt in 1...8 {
+            if attempt > 1 {
+                Socks5Tunnel.quit()
+                tun2socksTask = nil
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+
+            let state = Tun2SocksLaunchState()
+            let config: Socks5Tunnel.Config = .string(content: configText)
+            tun2socksTask = Task.detached(priority: .userInitiated) {
+                let code = Socks5Tunnel.run(withConfig: config)
+                state.setExit(code)
+            }
+
+            var earlyExit: Int32?
+            for _ in 0..<12 {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                if let code = state.getExit() {
+                    earlyExit = code
+                    break
+                }
+            }
+
+            if earlyExit == nil {
+                log("checkpoint: tun2socks running attempt=\(attempt)", level: .checkpoint)
+                startTun2SocksStatsProbe()
+                return
+            }
+
+            lastCode = earlyExit!
+            log(
+                "checkpoint: tun2socks exited early code=\(lastCode) attempt=\(attempt)",
+                level: .error
+            )
+        }
+
+        log(
+            "checkpoint: tun2socks FAILED code=\(lastCode) — VPN stays up without packet bridge",
+            level: .error
+        )
+    }
+
+    private func startTun2SocksStatsProbe() {
+        tun2socksStatsTask?.cancel()
+        tun2socksStatsTask = Task { [weak self] in
+            while !Task.isCancelled {
+                let stats = Socks5Tunnel.stats
+                self?.log(
+                    "checkpoint: tun2socks stats upPkts=\(stats.up.packets) upBytes=\(stats.up.bytes) downPkts=\(stats.down.packets) downBytes=\(stats.down.bytes)",
+                    level: .checkpoint
+                )
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+            }
         }
     }
 
     private func stopRuntime() async {
         eventTask?.cancel()
         eventTask = nil
+        tun2socksStatsTask?.cancel()
+        tun2socksStatsTask = nil
         tun2socksTask?.cancel()
         tun2socksTask = nil
         Socks5Tunnel.quit()

@@ -52,12 +52,6 @@ public final class ClientViewModel: ObservableObject {
             store.saveUseSystemProxy(useSystemProxy)
         }
     }
-    @Published public var sendDiagnostics: Bool {
-        didSet {
-            store.saveSendDiagnostics(sendDiagnostics)
-            DiagnosticLogUploader.shared.setEnabled(sendDiagnostics)
-        }
-    }
     @Published public var selectedNetworkService: String {
         didSet {
             store.saveSelectedNetworkService(selectedNetworkService)
@@ -65,6 +59,8 @@ public final class ClientViewModel: ObservableObject {
     }
     @Published public private(set) var networkServices: [String] = ["Wi-Fi"]
     @Published public private(set) var isImporting = false
+    @Published public private(set) var isUploadingLogs = false
+    @Published public private(set) var logUploadErrorMessage: String?
     @Published public private(set) var importErrorMessage: String?
     @Published public private(set) var refreshingSubscriptionIDs: Set<UUID> = []
     @Published public private(set) var pingingProfileIDs: Set<UUID> = []
@@ -98,6 +94,7 @@ public final class ClientViewModel: ObservableObject {
     private var runningMode: RunningMode?
     private var diagnosticSessionId: UUID?
     private var foregroundObserver: NSObjectProtocol?
+    private var tunnelLogSyncFailureCount = 0
     private let diagnosticUploader = DiagnosticLogUploader.shared
 
     public init(
@@ -124,7 +121,6 @@ public final class ClientViewModel: ObservableObject {
         #endif
         let hasStoredUseSystemProxy = store.hasUseSystemProxyPreference()
         useSystemProxy = store.loadUseSystemProxy(defaultValue: defaultUseSystemProxy)
-        sendDiagnostics = store.loadSendDiagnostics(defaultValue: true)
         selectedNetworkService = store.loadSelectedNetworkService()
 
         let storedProfiles = store.loadProfiles()
@@ -144,7 +140,6 @@ public final class ClientViewModel: ObservableObject {
         observeEngineEvents()
         loadNetworkServices()
         rescheduleAutomaticSubscriptionRefreshes()
-        diagnosticUploader.setEnabled(sendDiagnostics)
         #if os(iOS)
         if !hasStoredUseSystemProxy {
             enableSystemVPNByDefaultIfAvailable()
@@ -511,7 +506,6 @@ public final class ClientViewModel: ObservableObject {
                     wantsConnection = false
                     status = .failed(validationMessage)
                     appendLog(AppLocalization.format("Profile is incomplete: %@", validationMessage), level: .error)
-                    flushDiagnostics(reason: "validation")
                     return
                 }
             }
@@ -546,7 +540,6 @@ public final class ClientViewModel: ObservableObject {
             if isReconnect {
                 appendLog("checkpoint: auto-reconnect succeeded", level: .checkpoint)
             }
-            startDiagnosticsUpload(for: profileToStart, mode: "localSocks")
             #if os(iOS)
             startLocalProxyBackgroundRuntime()
             #endif
@@ -567,7 +560,6 @@ public final class ClientViewModel: ObservableObject {
             if wantsConnection {
                 appendLog(AppLocalization.format("Could not connect: %@", error.localizedDescription), level: .error)
                 appendLog("checkpoint: WaitReady/error \(error.localizedDescription)", level: .error)
-                flushDiagnostics(reason: "waitready_error")
                 await scheduleAutoReconnect(afterFailure: true)
                 return
             }
@@ -575,7 +567,6 @@ public final class ClientViewModel: ObservableObject {
             status = .failed(error.localizedDescription)
             appendLog(AppLocalization.format("Could not connect: %@", error.localizedDescription), level: .error)
             appendLog("checkpoint: WaitReady/error \(error.localizedDescription)", level: .error)
-            flushDiagnostics(reason: "connect_failed")
         }
     }
 
@@ -598,7 +589,6 @@ public final class ClientViewModel: ObservableObject {
                     continue
                 }
                 appendLog("checkpoint: engine stopped while Connected — auto-reconnect", level: .warn)
-                flushDiagnostics(reason: "link_drop")
                 await scheduleAutoReconnect(afterFailure: false)
                 return
             }
@@ -691,8 +681,6 @@ public final class ClientViewModel: ObservableObject {
         linkWatchTask = nil
         status = .stopping
         appendLog(AppLocalization.format("Disconnecting: %@.", selectedProfileName), level: .checkpoint)
-        flushDiagnostics(reason: "disconnect")
-        diagnosticUploader.stopPeriodicUpload()
 
         Task { [weak self] in
             guard let self else { return }
@@ -718,7 +706,6 @@ public final class ClientViewModel: ObservableObject {
     public func shutdownForAppTermination() {
         wantsConnection = false
         linkWatchTask?.cancel()
-        flushDiagnostics(reason: "app_terminate")
         guard status.isRunning || runningMode != nil else {
             return
         }
@@ -726,8 +713,110 @@ public final class ClientViewModel: ObservableObject {
     }
 
     public func clearLogs() {
-        DiagnosticJournal.shared.clearUI()
+        DiagnosticJournal.shared.clearAll()
         logs.removeAll()
+        logUploadErrorMessage = nil
+    }
+
+    public func clearLogUploadError() {
+        logUploadErrorMessage = nil
+    }
+
+    /// Pull Packet Tunnel logs via App Group file + provider IPC into the on-screen journal.
+    public func refreshDiagnosticLogs() {
+        DiagnosticJournal.shared.mergeSharedLogIntoUI()
+        logs = DiagnosticJournal.shared.recentUILines()
+        #if os(iOS)
+        if runningMode == .packetTunnel || status == .ready {
+            Task { await refreshDiagnosticLogsFromTunnel() }
+        }
+        #endif
+    }
+
+    #if os(iOS)
+    private func refreshDiagnosticLogsFromTunnel() async {
+        DiagnosticJournal.shared.mergeSharedLogIntoUI()
+        let result = await packetTunnelManager.fetchProviderLogs()
+        switch result {
+        case .success(let text):
+            tunnelLogSyncFailureCount = 0
+            if text.isEmpty {
+                noteTunnelLogSyncIssue(
+                    "checkpoint: tunnel-ipc dump empty (VPN connected? appGroup=\(DiagnosticJournal.isAppGroupAvailable() ? "ok" : "MISSING"))"
+                )
+            } else {
+                let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+                DiagnosticJournal.shared.ingestDisplayLines(lines, enqueuePending: true)
+            }
+        case .failure(let error):
+            noteTunnelLogSyncIssue(
+                "checkpoint: tunnel-ipc failed \(error.localizedDescription) appGroup=\(DiagnosticJournal.isAppGroupAvailable() ? "ok" : "MISSING")"
+            )
+        }
+        logs = DiagnosticJournal.shared.recentUILines()
+    }
+
+    private func noteTunnelLogSyncIssue(_ message: String) {
+        tunnelLogSyncFailureCount += 1
+        // Avoid flooding the journal while the log screen polls.
+        guard tunnelLogSyncFailureCount == 1 || tunnelLogSyncFailureCount % 20 == 0 else { return }
+        DiagnosticJournal.shared.append(message, level: .warn)
+    }
+    #endif
+
+    public func uploadLogsToServer() async {
+        guard !isUploadingLogs else { return }
+        logUploadErrorMessage = nil
+        #if os(iOS)
+        await refreshDiagnosticLogsFromTunnel()
+        #else
+        DiagnosticJournal.shared.mergeSharedLogIntoUI()
+        logs = DiagnosticJournal.shared.recentUILines()
+        #endif
+
+        let profile = profiles.first(where: { $0.id == selectedProfileID }) ?? draft
+        guard !profile.accessToken.isEmpty else {
+            logUploadErrorMessage = "Нет access token — обновите подписку."
+            return
+        }
+        guard DiagnosticJournal.shared.hasContent() || DiagnosticJournal.shared.pendingCount() > 0 else {
+            logUploadErrorMessage = "Журнал пуст."
+            return
+        }
+
+        isUploadingLogs = true
+        defer { isUploadingLogs = false }
+
+        let sessionId = diagnosticSessionId
+            ?? DiagnosticJournal.shared.currentSessionId()
+            ?? UUID()
+        diagnosticSessionId = sessionId
+        let mode: String
+        #if os(iOS)
+        mode = runningMode == .packetTunnel ? "packetTunnel" : DiagnosticJournal.shared.currentMode()
+        #else
+        mode = DiagnosticJournal.shared.currentMode()
+        #endif
+        let subscriptionURL = profile.subscription?.sourceURL.flatMap(URL.init(string:))
+        let context = DiagnosticLogUploader.makeContext(
+            accessToken: profile.accessToken,
+            deviceId: profile.clientID.isEmpty
+                ? (DiagnosticJournal.shared.currentDeviceId().isEmpty ? "unknown" : DiagnosticJournal.shared.currentDeviceId())
+                : profile.clientID,
+            sessionId: sessionId,
+            mode: mode,
+            subscriptionURL: subscriptionURL
+        )
+
+        do {
+            _ = try await diagnosticUploader.uploadAllPending(context: context)
+            clearLogs()
+        } catch {
+            let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            logUploadErrorMessage = message
+            appendLog("checkpoint: diagnostics upload failed \(message)", level: .error)
+            logs = DiagnosticJournal.shared.recentUILines()
+        }
     }
 
     private func persistProfiles() {
@@ -1283,49 +1372,9 @@ public final class ClientViewModel: ObservableObject {
         )
     }
 
-    private func startDiagnosticsUpload(for profile: ConnectionProfile, mode: String) {
-        guard sendDiagnostics else {
-            diagnosticUploader.stopPeriodicUpload()
-            return
-        }
-        let sessionId = diagnosticSessionId ?? UUID()
-        diagnosticSessionId = sessionId
-        let subscriptionURL = profile.subscription?.sourceURL.flatMap(URL.init(string:))
-        diagnosticUploader.updateContext(
-            DiagnosticLogUploader.makeContext(
-                accessToken: profile.accessToken,
-                deviceId: profile.clientID,
-                sessionId: sessionId,
-                mode: mode,
-                subscriptionURL: subscriptionURL
-            )
-        )
-        diagnosticUploader.setEnabled(true)
-        diagnosticUploader.startPeriodicUpload(intervalSeconds: 30)
-        diagnosticUploader.uploadNow(reason: "connected")
-    }
-
-    private func flushDiagnostics(reason: String) {
-        guard sendDiagnostics else { return }
-        let profile = profiles.first(where: { $0.id == selectedProfileID }) ?? draft
-        if !profile.accessToken.isEmpty {
-            let mode: String
-            #if os(iOS)
-            mode = runningMode == .packetTunnel ? "packetTunnel" : "localSocks"
-            #else
-            mode = "localSocks"
-            #endif
-            startDiagnosticsUpload(for: profile, mode: mode)
-        }
-        diagnosticUploader.uploadNow(reason: reason)
-    }
-
     private func handleAppBecameActive() {
         DiagnosticJournal.shared.mergeSharedLogIntoUI()
         logs = DiagnosticJournal.shared.recentUILines()
-        if sendDiagnostics, status == .ready {
-            diagnosticUploader.uploadNow(reason: "foreground")
-        }
     }
 
     private func loadNetworkServices() {
@@ -1378,7 +1427,6 @@ public final class ClientViewModel: ObservableObject {
                 )
                 DiagnosticJournal.shared.mergeSharedLogIntoUI()
                 logs = DiagnosticJournal.shared.recentUILines()
-                startDiagnosticsUpload(for: profile, mode: "packetTunnel")
             } catch {
                 if error is CancellationError {
                     await packetTunnelManager.stop()
@@ -1391,7 +1439,6 @@ public final class ClientViewModel: ObservableObject {
                     AppLocalization.format("Could not start VPN: %@", vpnStartFailureMessage(error)),
                     level: .error
                 )
-                flushDiagnostics(reason: "vpn_start_failed")
                 await packetTunnelManager.stop()            }
         }
     }

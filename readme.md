@@ -41,6 +41,6 @@ Upload the app-store IPA with Transporter / `xcrun altool`. On device enable **V
 ## Diagnostics
 
 - In-app **Журнал** (copy/share) with `checkpoint:` lines.
-- Toggle **Отправлять диагностику** (default ON) uploads redacted batches every ~60s to  
-  `POST /api/olcrtc/diagnostics/logs` (Bearer subscription JWT).
+- **Журнал → На сервер** uploads redacted batches to  
+  `POST /api/olcrtc/diagnostics/logs` (Bearer subscription JWT), then clears the local journal.
 - Ops pull: see `cockney_vpn_backend/Docs/OlcRtc/CLIENT.md`.

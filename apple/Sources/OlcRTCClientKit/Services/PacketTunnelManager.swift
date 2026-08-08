@@ -76,6 +76,43 @@ public final class PacketTunnelManager {
         }
     }
 
+    /// Ask the running Packet Tunnel for its in-process journal (IPC).
+    public func fetchProviderLogs() async -> Result<String, Error> {
+        do {
+            let managers = try await Self.loadAllManagers()
+            guard let manager = managers.first(where: { manager in
+                (manager.protocolConfiguration as? NETunnelProviderProtocol)?
+                    .providerBundleIdentifier == providerBundleIdentifier
+            }) else {
+                return .failure(PacketTunnelManagerError.providerDisconnected)
+            }
+            guard manager.connection.status == .connected,
+                  let session = manager.connection as? NETunnelProviderSession else {
+                return .failure(PacketTunnelManagerError.providerDisconnected)
+            }
+            let payload = try await sendProviderMessage("dump-logs", session: session)
+            let text = payload.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            return .success(text)
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    private func sendProviderMessage(
+        _ command: String,
+        session: NETunnelProviderSession
+    ) async throws -> Data? {
+        try await withCheckedThrowingContinuation { continuation in
+            do {
+                try session.sendProviderMessage(Data(command.utf8)) { response in
+                    continuation.resume(returning: response)
+                }
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
+    }
+
     private func loadOrCreateManager() async throws -> NETunnelProviderManager {
         let managers = try await Self.loadAllManagers()
         if let manager = managers.first(where: { manager in
@@ -95,7 +132,10 @@ public final class PacketTunnelManager {
         tunnelProtocol.providerBundleIdentifier = providerBundleIdentifier
         tunnelProtocol.serverAddress = configuration.carrierName
         tunnelProtocol.providerConfiguration = configuration.providerMetadata
-        tunnelProtocol.includeAllNetworks = true
+        // false: allow the Cockney app itself to reach the control plane
+        // (subscription / diagnostics HTTPS) directly. With true, app HTTPS
+        // goes through the tunnel and often fails with SSL/timeouts.
+        tunnelProtocol.includeAllNetworks = false
         tunnelProtocol.excludeLocalNetworks = true
         tunnelProtocol.enforceRoutes = true
 

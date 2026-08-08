@@ -73,5 +73,5 @@ xcodebuild -list -project apple/Godwit.xcodeproj
   `group.space.tokenova.cockney.ios`.
 - Team ID: `DEVELOPMENT_TEAM=…` или файл `CockneyVPN/secrets/apple_development_team`.
   TestFlight: `./apple/Scripts/build-ios-testflight.sh --olcrtc-root …`.
-- Диагностика: toggle «Отправлять диагностику» → POST `/api/olcrtc/diagnostics/logs`
-  (см. backend `Docs/OlcRtc/CLIENT.md`).
+- Диагностика: Журнал → «На сервер» → POST `/api/olcrtc/diagnostics/logs`, затем очистка
+  локального журнала (см. backend `Docs/OlcRtc/CLIENT.md`).

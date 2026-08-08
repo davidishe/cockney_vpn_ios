@@ -31,25 +31,38 @@ public struct DiagnosticLogUploadContext: Sendable {
     }
 }
 
-public enum DiagnosticLogUploaderError: Error {
+public enum DiagnosticLogUploaderError: Error, LocalizedError {
     case unauthorized
     case httpStatus(Int)
     case encoding
     case emptyToken
+    case nothingToUpload
+    case transport(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .unauthorized:
+            return "Сервер отклонил токен (401/403)."
+        case .httpStatus(let code):
+            return "HTTP \(code)"
+        case .encoding:
+            return "Не удалось сериализовать журнал."
+        case .emptyToken:
+            return "Нет access token — обновите подписку."
+        case .nothingToUpload:
+            return "Журнал пуст."
+        case .transport(let message):
+            return message
+        }
+    }
 }
 
-/// Periodically drains DiagnosticJournal pending lines to RU API.
+/// Manual upload of DiagnosticJournal pending lines to RU API.
 public final class DiagnosticLogUploader: @unchecked Sendable {
     public static let shared = DiagnosticLogUploader()
 
     private let journal: DiagnosticJournal
     private let session: URLSession
-    private let queue = DispatchQueue(label: "space.tokenova.cockney.diagnostic-uploader")
-    private var timer: DispatchSourceTimer?
-    private var inFlight = false
-    private var enabled = true
-    private var context: DiagnosticLogUploadContext?
-    private var consecutiveFailures = 0
 
     public init(
         journal: DiagnosticJournal = .shared,
@@ -57,40 +70,6 @@ public final class DiagnosticLogUploader: @unchecked Sendable {
     ) {
         self.journal = journal
         self.session = session
-    }
-
-    public func setEnabled(_ value: Bool) {
-        queue.sync { enabled = value }
-    }
-
-    public func updateContext(_ context: DiagnosticLogUploadContext?) {
-        queue.sync { self.context = context }
-    }
-
-    public func startPeriodicUpload(intervalSeconds: TimeInterval = 30) {
-        queue.async {
-            self.timer?.cancel()
-            let timer = DispatchSource.makeTimerSource(queue: self.queue)
-            timer.schedule(deadline: .now() + 3, repeating: intervalSeconds)
-            timer.setEventHandler { [weak self] in
-                self?.uploadIfNeeded(reason: "timer")
-            }
-            self.timer = timer
-            timer.resume()
-        }
-    }
-
-    public func stopPeriodicUpload() {
-        queue.async {
-            self.timer?.cancel()
-            self.timer = nil
-        }
-    }
-
-    public func uploadNow(reason: String = "manual") {
-        queue.async {
-            self.uploadIfNeeded(reason: reason)
-        }
     }
 
     public static func uploadURL(fromSubscriptionURL subscriptionURL: URL?) -> URL {
@@ -132,73 +111,30 @@ public final class DiagnosticLogUploader: @unchecked Sendable {
         )
     }
 
-    private func uploadIfNeeded(reason: String) {
-        guard enabled, !inFlight else { return }
-        guard let context else {
-            if reason != "timer" {
-                journal.append("checkpoint: diagnostics upload skipped reason=\(reason) (no context)", level: .warn)
-            }
-            return
-        }
+    /// Drain and POST all pending batches. Does not append checkpoints into the journal.
+    public func uploadAllPending(context: DiagnosticLogUploadContext) async throws -> Int {
         guard !context.accessToken.isEmpty else {
-            journal.append("checkpoint: diagnostics upload skipped reason=\(reason) (empty jwt)", level: .warn)
-            return
+            throw DiagnosticLogUploaderError.emptyToken
         }
-
-        let batch = journal.drainPending(limit: 100)
-        guard !batch.isEmpty else { return }
-        inFlight = true
-
-        if reason != "timer" {
-            journal.append(
-                "checkpoint: diagnostics upload start reason=\(reason) lines=\(batch.count)",
-                level: .checkpoint
-            )
-        }
-
-        Task {
+        journal.prepareForUpload()
+        var total = 0
+        while true {
+            let batch = journal.drainPending(limit: 100)
+            if batch.isEmpty {
+                break
+            }
             do {
                 try await performUpload(context: context, lines: batch)
-                queue.async {
-                    self.consecutiveFailures = 0
-                    self.inFlight = false
-                }
-                self.journal.append(
-                    "checkpoint: diagnostics upload ok reason=\(reason) lines=\(batch.count)",
-                    level: .checkpoint
-                )
-            } catch DiagnosticLogUploaderError.unauthorized {
-                journal.requeue(batch)
-                queue.async {
-                    self.consecutiveFailures += 1
-                    self.inFlight = false
-                }
-                self.journal.append(
-                    "checkpoint: diagnostics upload 401/403 reason=\(reason)",
-                    level: .error
-                )
-            } catch DiagnosticLogUploaderError.httpStatus(let code) {
-                journal.requeue(batch)
-                queue.async {
-                    self.consecutiveFailures += 1
-                    self.inFlight = false
-                }
-                self.journal.append(
-                    "checkpoint: diagnostics upload http=\(code) reason=\(reason)",
-                    level: .error
-                )
+                total += batch.count
             } catch {
                 journal.requeue(batch)
-                queue.async {
-                    self.consecutiveFailures += 1
-                    self.inFlight = false
-                }
-                self.journal.append(
-                    "checkpoint: diagnostics upload failed reason=\(reason) err=\(error.localizedDescription)",
-                    level: .error
-                )
+                throw error
             }
         }
+        if total == 0 {
+            throw DiagnosticLogUploaderError.nothingToUpload
+        }
+        return total
     }
 
     private func performUpload(context: DiagnosticLogUploadContext, lines: [DiagnosticLogEntry]) async throws {
@@ -238,15 +174,36 @@ public final class DiagnosticLogUploader: @unchecked Sendable {
         request.httpBody = data
         request.timeoutInterval = 30
 
-        let (_, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw DiagnosticLogUploaderError.httpStatus(-1)
+        do {
+            let (_, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw DiagnosticLogUploaderError.httpStatus(-1)
+            }
+            if http.statusCode == 401 || http.statusCode == 403 {
+                throw DiagnosticLogUploaderError.unauthorized
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                throw DiagnosticLogUploaderError.httpStatus(http.statusCode)
+            }
+        } catch let urlError as URLError {
+            throw DiagnosticLogUploaderError.transport(Self.describeURLError(urlError))
         }
-        if http.statusCode == 401 || http.statusCode == 403 {
-            throw DiagnosticLogUploaderError.unauthorized
-        }
-        guard (200..<300).contains(http.statusCode) else {
-            throw DiagnosticLogUploaderError.httpStatus(http.statusCode)
+    }
+
+    private static func describeURLError(_ error: URLError) -> String {
+        switch error.code {
+        case .serverCertificateUntrusted,
+             .serverCertificateHasBadDate,
+             .serverCertificateNotYetValid,
+             .serverCertificateHasUnknownRoot,
+             .secureConnectionFailed,
+             .clientCertificateRejected,
+             .clientCertificateRequired:
+            return "SSL: \(error.localizedDescription). Если VPN включён — пересоберите клиент (обход API) или отключите VPN и повторите."
+        case .notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotConnectToHost, .dnsLookupFailed:
+            return "Сеть: \(error.localizedDescription)"
+        default:
+            return error.localizedDescription
         }
     }
 }

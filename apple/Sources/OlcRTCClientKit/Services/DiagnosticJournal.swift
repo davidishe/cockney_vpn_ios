@@ -108,10 +108,87 @@ public final class DiagnosticJournal: @unchecked Sendable {
         queue.sync { uiLines }
     }
 
+    public func exportDisplayLines(limit: Int = 500) -> [String] {
+        queue.sync { Array(uiLines.suffix(max(0, limit))) }
+    }
+
+    /// Merge display lines produced in another process (Packet Tunnel IPC).
+    public func ingestDisplayLines(_ lines: [String], enqueuePending: Bool = true) {
+        queue.sync {
+            for line in lines where !line.isEmpty {
+                if uiLines.contains(line) { continue }
+                uiLines.append(line)
+                if enqueuePending {
+                    let message = stripDisplayTimestamp(line)
+                    pending.append(
+                        DiagnosticLogEntry(
+                            ts: isoFormatter.string(from: Date()),
+                            level: message.hasPrefix("checkpoint:") || message.hasPrefix("socks:")
+                                ? DiagnosticLogLevel.checkpoint.rawValue
+                                : DiagnosticLogLevel.info.rawValue,
+                            message: message,
+                            sessionId: sessionId?.uuidString,
+                            mode: mode
+                        )
+                    )
+                }
+            }
+            if uiLines.count > Self.maxUILines {
+                uiLines.removeFirst(uiLines.count - Self.maxUILines)
+            }
+            if pending.count > Self.maxPendingEntries {
+                pending.removeFirst(pending.count - Self.maxPendingEntries)
+            }
+            persistUILines()
+            if enqueuePending {
+                persistPending()
+            }
+        }
+    }
+
+    public static func isAppGroupAvailable() -> Bool {
+        FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: appGroupIdentifier
+        ) != nil
+    }
+
+    public func diagnosticsDirectoryPath() -> String {
+        queue.sync { baseDirectory().path }
+    }
+
     public func clearUI() {
         queue.sync {
             uiLines.removeAll()
             persistUILines()
+        }
+    }
+
+    public func clearAll() {
+        queue.sync {
+            uiLines.removeAll()
+            pending.removeAll()
+            sessionId = nil
+            persistUILines()
+            persistPending()
+            persistMeta()
+            if let url = sharedLogURL() {
+                try? "".data(using: .utf8)?.write(to: url, options: .atomic)
+            }
+        }
+    }
+
+    public func pendingCount() -> Int {
+        queue.sync { pending.count }
+    }
+
+    public func hasContent() -> Bool {
+        queue.sync { !uiLines.isEmpty || !pending.isEmpty }
+    }
+
+    /// Pull App Group shared.log into UI + pending so tunnel lines are included in manual upload.
+    public func prepareForUpload() {
+        queue.sync {
+            mergeSharedLogLocked(enqueuePending: true)
         }
     }
 
@@ -151,24 +228,58 @@ public final class DiagnosticJournal: @unchecked Sendable {
 
     public func mergeSharedLogIntoUI() {
         queue.sync {
-            guard let url = sharedLogURL(),
-                  let data = try? Data(contentsOf: url),
-                  let text = String(data: data, encoding: .utf8) else {
-                return
-            }
-            let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-            guard !lines.isEmpty else { return }
-            // Keep a rolling shared file; pull new-looking lines into UI ring.
-            for line in lines.suffix(500) where !line.isEmpty {
-                if !uiLines.contains(line) {
-                    uiLines.append(line)
+            mergeSharedLogLocked(enqueuePending: false)
+        }
+    }
+
+    private func mergeSharedLogLocked(enqueuePending: Bool) {
+        guard let url = sharedLogURL(),
+              let data = try? Data(contentsOf: url),
+              let text = String(data: data, encoding: .utf8) else {
+            return
+        }
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        guard !lines.isEmpty else { return }
+        for line in lines.suffix(500) where !line.isEmpty {
+            if !uiLines.contains(line) {
+                uiLines.append(line)
+                if enqueuePending {
+                    let message = stripDisplayTimestamp(line)
+                    pending.append(
+                        DiagnosticLogEntry(
+                            ts: isoFormatter.string(from: Date()),
+                            level: message.hasPrefix("checkpoint:") || message.hasPrefix("socks:")
+                                ? DiagnosticLogLevel.checkpoint.rawValue
+                                : DiagnosticLogLevel.info.rawValue,
+                            message: message,
+                            sessionId: sessionId?.uuidString,
+                            mode: mode
+                        )
+                    )
                 }
             }
-            if uiLines.count > Self.maxUILines {
-                uiLines.removeFirst(uiLines.count - Self.maxUILines)
-            }
-            persistUILines()
         }
+        if uiLines.count > Self.maxUILines {
+            uiLines.removeFirst(uiLines.count - Self.maxUILines)
+        }
+        if pending.count > Self.maxPendingEntries {
+            pending.removeFirst(pending.count - Self.maxPendingEntries)
+        }
+        persistUILines()
+        if enqueuePending {
+            persistPending()
+        }
+    }
+
+    private func stripDisplayTimestamp(_ line: String) -> String {
+        // "[HH:mm:ss.SSS] message"
+        guard line.first == "[",
+              let close = line.firstIndex(of: "]"),
+              line.distance(from: line.startIndex, to: close) <= 16 else {
+            return line
+        }
+        let after = line.index(after: close)
+        return line[after...].trimmingCharacters(in: .whitespaces)
     }
 
     // MARK: - Storage

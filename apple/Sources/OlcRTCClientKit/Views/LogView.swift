@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 #if os(iOS)
 import UIKit
@@ -7,14 +8,32 @@ import AppKit
 
 public struct LogView: View {
     let logs: [String]
+    let isUploading: Bool
+    let uploadErrorMessage: String?
     let onClear: () -> Void
+    let onUpload: () -> Void
+    let onRefresh: () -> Void
+    let onDismissUploadError: () -> Void
     #if os(iOS)
     @State private var isSharing = false
     #endif
 
-    public init(logs: [String], onClear: @escaping () -> Void) {
+    public init(
+        logs: [String],
+        isUploading: Bool = false,
+        uploadErrorMessage: String? = nil,
+        onClear: @escaping () -> Void,
+        onUpload: @escaping () -> Void = {},
+        onRefresh: @escaping () -> Void = {},
+        onDismissUploadError: @escaping () -> Void = {}
+    ) {
         self.logs = logs
+        self.isUploading = isUploading
+        self.uploadErrorMessage = uploadErrorMessage
         self.onClear = onClear
+        self.onUpload = onUpload
+        self.onRefresh = onRefresh
+        self.onDismissUploadError = onDismissUploadError
     }
 
     public var body: some View {
@@ -27,24 +46,52 @@ public struct LogView: View {
                     .font(.headline)
                 #endif
                 Spacer()
+                Button(action: onRefresh) {
+                    Label("Обновить", systemImage: "arrow.clockwise")
+                }
+                .disabled(isUploading)
                 Button(action: copyLogs) {
                     Label("Копировать", systemImage: "doc.on.doc")
                 }
-                .disabled(logs.isEmpty)
+                .disabled(logs.isEmpty || isUploading)
                 #if os(iOS)
                 Button {
                     isSharing = true
                 } label: {
                     Label("Поделиться", systemImage: "square.and.arrow.up")
                 }
-                .disabled(logs.isEmpty)
+                .disabled(logs.isEmpty || isUploading)
                 #endif
+                Button(action: onUpload) {
+                    if isUploading {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Label("На сервер", systemImage: "icloud.and.arrow.up")
+                    }
+                }
+                .disabled(logs.isEmpty || isUploading)
                 Button(action: onClear) {
                     Label("Очистить", systemImage: "trash")
                 }
-                .disabled(logs.isEmpty)
+                .disabled(logs.isEmpty || isUploading)
             }
             .padding([.horizontal, .top])
+
+            if let uploadErrorMessage, !uploadErrorMessage.isEmpty {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(uploadErrorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button("OK", action: onDismissUploadError)
+                        .font(.footnote.weight(.semibold))
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+            }
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -73,6 +120,11 @@ public struct LogView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear(perform: onRefresh)
+        .onReceive(Timer.publish(every: 2.0, on: .main, in: .common).autoconnect()) { _ in
+            guard !isUploading else { return }
+            onRefresh()
+        }
         #if os(iOS)
         .font(.subheadline)
         .sheet(isPresented: $isSharing) {
