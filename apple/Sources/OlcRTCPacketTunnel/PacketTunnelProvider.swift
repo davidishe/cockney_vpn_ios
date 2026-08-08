@@ -414,6 +414,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 startTun2SocksLogProbe()
                 Task.detached(priority: .utility) { [weak self] in
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    self?.logDefaultRoutes()
                     self?.runRoutingProbe()
                 }
                 return
@@ -446,9 +447,90 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
-    /// Sockets opened here are subject to the system routing table, so an unprotected
-    /// connect proves whether the default route actually points into the tunnel:
-    /// tun2socks sees the SYN when it does, and nothing at all when it does not.
+    /// The extension's own sockets are excluded from its own tunnel, so probing from
+    /// here says nothing about app traffic. Read the kernel table instead and report
+    /// which interface owns the IPv4 default route.
+    private func logDefaultRoutes() {
+        // net/route.h is not exposed to Swift on iOS; mirror the kernel layout.
+        struct RTMetrics {
+            var locks: UInt32 = 0, mtu: UInt32 = 0, hopcount: UInt32 = 0, expire: Int32 = 0
+            var recvpipe: UInt32 = 0, sendpipe: UInt32 = 0, ssthresh: UInt32 = 0
+            var rtt: UInt32 = 0, rttvar: UInt32 = 0, pksent: UInt32 = 0, state: UInt32 = 0
+            var filler0: UInt32 = 0, filler1: UInt32 = 0, filler2: UInt32 = 0
+        }
+        struct RTMsgHdr {
+            var msglen: UInt16 = 0, version: UInt8 = 0, type: UInt8 = 0, index: UInt16 = 0
+            var flags: Int32 = 0, addrs: Int32 = 0, pid: Int32 = 0, seq: Int32 = 0
+            var errno: Int32 = 0, use: Int32 = 0, inits: UInt32 = 0
+            var rmx = RTMetrics()
+        }
+        let rtfUp: Int32 = 0x1
+        let rtaDst: Int32 = 0x1
+        let rtaGateway: Int32 = 0x2
+
+        var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_DUMP, 0]
+        var needed = 0
+        guard sysctl(&mib, 6, nil, &needed, nil, 0) == 0, needed > 0 else {
+            log("checkpoint: route table size query failed errno=\(errno)", level: .checkpoint)
+            return
+        }
+
+        var buffer = [UInt8](repeating: 0, count: needed)
+        guard sysctl(&mib, 6, &buffer, &needed, nil, 0) == 0 else {
+            log("checkpoint: route table dump failed errno=\(errno)", level: .checkpoint)
+            return
+        }
+
+        let headerSize = MemoryLayout<RTMsgHdr>.size
+        var defaults: [String] = []
+        buffer.withUnsafeBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            var offset = 0
+            while offset + headerSize <= needed {
+                let header = base.advanced(by: offset)
+                    .loadUnaligned(as: RTMsgHdr.self)
+                let length = Int(header.msglen)
+                guard length >= headerSize, offset + length <= needed else { break }
+                defer { offset += length }
+
+                guard header.flags & rtfUp != 0, header.addrs & rtaDst != 0 else { continue }
+
+                var cursor = offset + headerSize
+                let dst = base.advanced(by: cursor).loadUnaligned(as: sockaddr.self)
+                guard dst.sa_family == UInt8(AF_INET) else { continue }
+                let dstIn = base.advanced(by: cursor).loadUnaligned(as: sockaddr_in.self)
+                guard dstIn.sin_addr.s_addr == 0 else { continue }
+
+                cursor += (max(Int(dst.sa_len), 4) + 3) & ~3
+                var gateway = "?"
+                if header.addrs & rtaGateway != 0, cursor + MemoryLayout<sockaddr>.size <= needed {
+                    let gw = base.advanced(by: cursor).loadUnaligned(as: sockaddr.self)
+                    if gw.sa_family == UInt8(AF_INET) {
+                        var addr = base.advanced(by: cursor)
+                            .loadUnaligned(as: sockaddr_in.self).sin_addr
+                        var text = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+                        if inet_ntop(AF_INET, &addr, &text, socklen_t(INET_ADDRSTRLEN)) != nil {
+                            gateway = String(cString: text)
+                        }
+                    } else if gw.sa_family == UInt8(AF_LINK) {
+                        gateway = "link"
+                    }
+                }
+
+                var ifName = [CChar](repeating: 0, count: Int(IFNAMSIZ))
+                let name = if_indextoname(UInt32(header.index), &ifName) != nil
+                    ? String(cString: ifName)
+                    : "idx\(header.index)"
+                defaults.append("\(name)->\(gateway)")
+            }
+        }
+
+        log(
+            "checkpoint: ipv4 default routes hdr=\(headerSize) [\(defaults.joined(separator: " "))]",
+            level: .checkpoint
+        )
+    }
+
     private func runRoutingProbe() {
         let probeIP = "1.1.1.1"
         let probePort: UInt16 = 80
