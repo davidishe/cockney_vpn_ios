@@ -5,16 +5,22 @@ enum DiagnosticLogRedactor {
     private static let subscriptionPathPattern =
         #"(?i)(/api/olcrtc/subscriptions/)([A-Za-z0-9._~-]+)"#
     private static let hexKeyPattern = #"(?i)\b([0-9a-f]{16})([0-9a-f]{32,})([0-9a-f]{16})\b"#
+    private static let bearerPattern = #"(?i)\bBearer\s+[A-Za-z0-9._\-+/=]+\b"#
+    private static let carrierAuthPattern = #"(?i)(carrierAuth(Token)?=)([^\s]+)"#
+    private static let cookiesPattern = #"(?i)(cookie[s]?\s*[:=]\s*)([^\s]+)"#
 
     static func redact(_ message: String) -> String {
         var result = message
         result = replace(result, pattern: jwtPattern, template: "jwt:***")
+        result = replace(result, pattern: bearerPattern, template: "Bearer ***")
         result = replace(
             result,
             pattern: subscriptionPathPattern,
             template: "$1***"
         )
         result = replace(result, pattern: hexKeyPattern, template: "$1…$3")
+        result = replace(result, pattern: carrierAuthPattern, template: "$1***")
+        result = replace(result, pattern: cookiesPattern, template: "$1***")
         return result
     }
 

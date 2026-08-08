@@ -395,7 +395,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = community.openlibre.olcrtc.ios;
+				PRODUCT_BUNDLE_IDENTIFIER = space.tokenova.cockney.ios;
 				PRODUCT_NAME = Cockney;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -415,7 +415,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				PRODUCT_BUNDLE_IDENTIFIER = community.openlibre.olcrtc.macos;
+				PRODUCT_BUNDLE_IDENTIFIER = space.tokenova.cockney.macos;
 				PRODUCT_NAME = Cockney;
 				SDKROOT = macosx;
 			};
@@ -434,7 +434,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				PRODUCT_BUNDLE_IDENTIFIER = community.openlibre.olcrtc.macos;
+				PRODUCT_BUNDLE_IDENTIFIER = space.tokenova.cockney.macos;
 				PRODUCT_NAME = Cockney;
 				SDKROOT = macosx;
 			};
@@ -452,7 +452,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = community.openlibre.olcrtc.ios;
+				PRODUCT_BUNDLE_IDENTIFIER = space.tokenova.cockney.ios;
 				PRODUCT_NAME = Cockney;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -525,7 +525,7 @@
 				INFOPLIST_FILE = Sources/OlcRTCPacketTunnel/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				PRODUCT_BUNDLE_IDENTIFIER = community.openlibre.olcrtc.ios.PacketTunnel;
+				PRODUCT_BUNDLE_IDENTIFIER = space.tokenova.cockney.ios.PacketTunnel;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -539,7 +539,7 @@
 				INFOPLIST_FILE = Sources/OlcRTCPacketTunnel/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
-				PRODUCT_BUNDLE_IDENTIFIER = community.openlibre.olcrtc.ios.PacketTunnel;
+				PRODUCT_BUNDLE_IDENTIFIER = space.tokenova.cockney.ios.PacketTunnel;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};

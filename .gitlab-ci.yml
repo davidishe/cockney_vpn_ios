@@ -6,9 +6,9 @@ include:
 variables:
   XCODE_PROJECT: "apple/Godwit.xcodeproj"
   XCODE_SCHEME: "OlcRTCClient iOS"
-  APP_IDENTIFIER: "community.openlibre.olcrtc.ios"
-  APP_IDENTIFIERS: "community.openlibre.olcrtc.ios,community.openlibre.olcrtc.ios.PacketTunnel"
-  IOS_SIGNING_TARGETS: "OlcRTCClient iOS=community.openlibre.olcrtc.ios,OlcRTCPacketTunnel=community.openlibre.olcrtc.ios.PacketTunnel"
+  APP_IDENTIFIER: "space.tokenova.cockney.ios"
+  APP_IDENTIFIERS: "space.tokenova.cockney.ios,space.tokenova.cockney.ios.PacketTunnel"
+  IOS_SIGNING_TARGETS: "OlcRTCClient iOS=space.tokenova.cockney.ios,OlcRTCPacketTunnel=space.tokenova.cockney.ios.PacketTunnel"
 
 mobile:testflight:
   extends: .mobile:defaults

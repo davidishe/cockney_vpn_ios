@@ -68,4 +68,10 @@ xcodebuild -list -project apple/Godwit.xcodeproj
   local testing; для системного iOS-трафика нужен сторонний маршрутизатор
   трафика или подписанная Packet Tunnel сборка.
 - Для реального iPhone с Packet Tunnel нужен платный Apple Developer Program и
-  provisioning profiles с Network Extension capability для обоих iOS targets.
+  provisioning profiles с Network Extension capability для обоих iOS targets
+  (`space.tokenova.cockney.ios` + `.PacketTunnel`) и App Group
+  `group.space.tokenova.cockney.ios`.
+- Team ID: `DEVELOPMENT_TEAM=…` или файл `CockneyVPN/secrets/apple_development_team`.
+  TestFlight: `./apple/Scripts/build-ios-testflight.sh --olcrtc-root …`.
+- Диагностика: toggle «Отправлять диагностику» → POST `/api/olcrtc/diagnostics/logs`
+  (см. backend `Docs/OlcRtc/CLIENT.md`).

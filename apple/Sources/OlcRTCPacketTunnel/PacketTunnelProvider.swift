@@ -16,6 +16,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private var engine: GomobileOlcRTCEngine?
     private var tun2socksTask: Task<Void, Never>?
     private var configFileURL: URL?
+    private var eventTask: Task<Void, Never>?
 
     override func startTunnel(
         options: [String: NSObject]?,
@@ -27,11 +28,22 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                     providerConfiguration: (protocolConfiguration as? NETunnelProviderProtocol)?.providerConfiguration,
                     startOptions: options
                 )
+                let sessionId = UUID()
+                DiagnosticJournal.shared.configureSession(
+                    sessionId: sessionId,
+                    mode: "packetTunnel",
+                    deviceId: configuration.connectionProfile.clientID
+                )
+                log("checkpoint: VPN extension startTunnel", level: .checkpoint)
                 try await startOlcRTC(configuration: configuration)
+                log("checkpoint: WaitReady ok — applying tunnel settings", level: .checkpoint)
                 try await applyNetworkSettings()
+                log("checkpoint: tunnel settings applied addr=\(Constants.tunnelAddress)", level: .checkpoint)
                 try await startTun2Socks(configuration: configuration)
+                log("checkpoint: tun2socks started", level: .checkpoint)
                 completionHandler(nil)
             } catch {
+                log("checkpoint: VPN start failed \(error.localizedDescription)", level: .error)
                 completionHandler(error)
                 await stopRuntime()
             }
@@ -43,6 +55,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         completionHandler: @escaping () -> Void
     ) {
         Task {
+            log("checkpoint: VPN extension stopTunnel reason=\(reason.rawValue)", level: .checkpoint)
             await stopRuntime()
             completionHandler()
         }
@@ -53,7 +66,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         let startOptions = OlcRTCStartOptions(profile: profile)
         let engine = GomobileOlcRTCEngine()
         self.engine = engine
+        observeEngine(engine)
 
+        log(
+            "checkpoint: MobileStart carrier=\(startOptions.carrierName) transport=\(startOptions.transportName) room=\(startOptions.roomID) socks=\(startOptions.socksPort) jwt=\(startOptions.accessToken.isEmpty ? "missing" : "present") carrierAuth=\(startOptions.carrierAuthToken.isEmpty ? "missing" : "present")",
+            level: .checkpoint
+        )
         try await engine.start(options: startOptions)
         try await engine.waitReady(
             timeoutMillis: max(
@@ -61,6 +79,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 ConnectionProfile.defaultStartTimeoutMillis
             )
         )
+    }
+
+    private func observeEngine(_ engine: GomobileOlcRTCEngine) {
+        eventTask?.cancel()
+        eventTask = Task {
+            for await message in engine.events {
+                log(message, level: message.hasPrefix("checkpoint:") || message.hasPrefix("socks:") ? .checkpoint : .info)
+            }
+        }
     }
 
     private func applyNetworkSettings() async throws {
@@ -101,6 +128,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             debugLogging: configuration.debugLogging
         ).write(to: fileURL, atomically: true, encoding: .utf8)
         configFileURL = fileURL
+        log("checkpoint: tun2socks config socks=127.0.0.1:\(socksPort)", level: .checkpoint)
 
         tun2socksTask = Task.detached(priority: .userInitiated) {
             _ = Socks5Tunnel.run(withConfig: .file(path: fileURL))
@@ -108,6 +136,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     private func stopRuntime() async {
+        eventTask?.cancel()
+        eventTask = nil
         tun2socksTask?.cancel()
         tun2socksTask = nil
         Socks5Tunnel.quit()
@@ -119,6 +149,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
         await engine?.stop()
         engine = nil
+        DiagnosticJournal.shared.clearSession()
+    }
+
+    private func log(_ message: String, level: DiagnosticLogLevel) {
+        DiagnosticJournal.shared.append(message, level: level)
     }
 
     private func tun2socksConfiguration(

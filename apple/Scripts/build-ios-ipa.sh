@@ -78,6 +78,17 @@ MSG
   exit 1
 fi
 
+# Prefer env; else CockneyVPN/secrets/apple_development_team (one line, Team ID).
+if [[ -z "${DEVELOPMENT_TEAM:-}" ]]; then
+  SECRETS_TEAM_FILE="${COCKNEY_APPLE_TEAM_FILE:-}"
+  if [[ -z "$SECRETS_TEAM_FILE" ]]; then
+    SECRETS_TEAM_FILE="$(cd "$ROOT_DIR/.." && pwd)/secrets/apple_development_team"
+  fi
+  if [[ -f "$SECRETS_TEAM_FILE" ]]; then
+    DEVELOPMENT_TEAM="$(tr -d '[:space:]' < "$SECRETS_TEAM_FILE" || true)"
+  fi
+fi
+
 if [[ -z "${DEVELOPMENT_TEAM:-}" ]]; then
   cat <<'MSG'
 DEVELOPMENT_TEAM is required for an installable IPA.
@@ -85,11 +96,16 @@ DEVELOPMENT_TEAM is required for an installable IPA.
 Example:
   DEVELOPMENT_TEAM=ABCDE12345 EXPORT_METHOD=development ./apple/Scripts/build-ios-ipa.sh
 
-The app and packet tunnel extension provisioning profiles must both include the
-Network Extension packet-tunnel-provider entitlement.
+Or put the Team ID in:
+  CockneyVPN/secrets/apple_development_team
+
+The app and packet tunnel extension App IDs must include Network Extension
+(packet-tunnel) and App Group group.space.tokenova.cockney.ios.
 MSG
   exit 1
 fi
+
+export DEVELOPMENT_TEAM
 
 case "$EXPORT_METHOD" in
   development|ad-hoc|app-store|enterprise)

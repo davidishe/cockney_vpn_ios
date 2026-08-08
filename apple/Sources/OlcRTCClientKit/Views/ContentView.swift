@@ -356,6 +356,13 @@ private struct ProfileSettingsScreen: View {
                 }
                 #endif
 
+                Section("Диагностика") {
+                    Toggle("Отправлять диагностику", isOn: $viewModel.sendDiagnostics)
+                    Text("Журнал периодически уходит на сервер Cockney (без секретов).")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Запуск") {
                     TextField("DNS-сервер", text: $viewModel.draft.dnsServer)
                         .settingsPlainInput()

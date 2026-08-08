@@ -7,6 +7,7 @@ public final class ProfileStore {
     private let selectedKey = "olcrtc.apple.selectedProfile.v1"
     private let useSystemProxyKey = "olcrtc.apple.useSystemProxy.v1"
     private let selectedNetworkServiceKey = "olcrtc.apple.selectedNetworkService.v1"
+    private let sendDiagnosticsKey = "olcrtc.apple.sendDiagnostics.v1"
 
     public init(
         defaults: UserDefaults = .standard,
@@ -89,5 +90,16 @@ public final class ProfileStore {
 
     public func saveSelectedNetworkService(_ value: String) {
         defaults.set(value, forKey: selectedNetworkServiceKey)
+    }
+
+    public func loadSendDiagnostics(defaultValue: Bool = true) -> Bool {
+        guard let value = defaults.object(forKey: sendDiagnosticsKey) as? Bool else {
+            return defaultValue
+        }
+        return value
+    }
+
+    public func saveSendDiagnostics(_ value: Bool) {
+        defaults.set(value, forKey: sendDiagnosticsKey)
     }
 }

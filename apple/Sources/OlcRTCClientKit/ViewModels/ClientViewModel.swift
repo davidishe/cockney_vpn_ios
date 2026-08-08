@@ -1,4 +1,10 @@
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
+#if canImport(AppKit) && !canImport(UIKit)
+import AppKit
+#endif
 
 private enum RunningMode {
     case localProxy
@@ -9,6 +15,8 @@ private enum RunningMode {
 
 private let portConflictRetryAttempts = 10
 private let portConflictRetryDelayNanoseconds: UInt64 = 200_000_000
+private let linkWatchIntervalNanoseconds: UInt64 = 2_000_000_000
+private let reconnectBackoffCapSeconds: Double = 30
 
 private enum SubscriptionRefreshTrigger {
     case manual
@@ -45,6 +53,12 @@ public final class ClientViewModel: ObservableObject {
             store.saveUseSystemProxy(useSystemProxy)
         }
     }
+    @Published public var sendDiagnostics: Bool {
+        didSet {
+            store.saveSendDiagnostics(sendDiagnostics)
+            DiagnosticLogUploader.shared.setEnabled(sendDiagnostics)
+        }
+    }
     @Published public var selectedNetworkService: String {
         didSet {
             store.saveSelectedNetworkService(selectedNetworkService)
@@ -70,6 +84,9 @@ public final class ClientViewModel: ObservableObject {
     #endif
     private var eventTask: Task<Void, Never>?
     private var startTask: Task<Void, Never>?
+    private var linkWatchTask: Task<Void, Never>?
+    private var wantsConnection = false
+    private var reconnectAttempt = 0
     private var importTask: Task<Void, Never>?
     private var refreshTasks: [UUID: Task<Void, Never>] = [:]
     private var refreshTaskTokens: [UUID: UUID] = [:]
@@ -80,6 +97,9 @@ public final class ClientViewModel: ObservableObject {
     private var pingTasks: [UUID: Task<Void, Never>] = [:]
     private var subscriptionPingTasks: [UUID: Task<Void, Never>] = [:]
     private var runningMode: RunningMode?
+    private var diagnosticSessionId: UUID?
+    private var foregroundObserver: NSObjectProtocol?
+    private let diagnosticUploader = DiagnosticLogUploader.shared
 
     public init(
         engine: OlcRTCEngine = OlcRTCEngineFactory.makeDefault(),
@@ -105,6 +125,7 @@ public final class ClientViewModel: ObservableObject {
         #endif
         let hasStoredUseSystemProxy = store.hasUseSystemProxyPreference()
         useSystemProxy = store.loadUseSystemProxy(defaultValue: defaultUseSystemProxy)
+        sendDiagnostics = store.loadSendDiagnostics(defaultValue: true)
         selectedNetworkService = store.loadSelectedNetworkService()
 
         let storedProfiles = store.loadProfiles()
@@ -119,18 +140,38 @@ public final class ClientViewModel: ObservableObject {
         profiles = loadedProfiles
         selectedProfileID = initialProfile?.id
         draft = initialProfile ?? .empty
+        logs = DiagnosticJournal.shared.recentUILines()
 
         observeEngineEvents()
         loadNetworkServices()
         rescheduleAutomaticSubscriptionRefreshes()
+        diagnosticUploader.setEnabled(sendDiagnostics)
         #if os(iOS)
         if !hasStoredUseSystemProxy {
             enableSystemVPNByDefaultIfAvailable()
         }
         #endif
+        foregroundObserver = NotificationCenter.default.addObserver(
+            forName: {
+                #if os(iOS)
+                return UIApplication.willEnterForegroundNotification
+                #else
+                return NSApplication.didBecomeActiveNotification
+                #endif
+            }(),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.handleAppBecameActive()
+            }
+        }
     }
 
     deinit {
+        if let foregroundObserver {
+            NotificationCenter.default.removeObserver(foregroundObserver)
+        }
         eventTask?.cancel()
         startTask?.cancel()
         importTask?.cancel()
@@ -399,6 +440,9 @@ public final class ClientViewModel: ObservableObject {
     public func start() {
         saveDraft()
         startTask?.cancel()
+        linkWatchTask?.cancel()
+        wantsConnection = true
+        reconnectAttempt = 0
 
         var profileToStart = draft.normalizedForCurrentDefaults()
         if profileToStart != draft {
@@ -407,6 +451,7 @@ public final class ClientViewModel: ObservableObject {
         }
 
         if let validationMessage = validate(profile: profileToStart) {
+            wantsConnection = false
             status = .failed(validationMessage)
             appendLog(AppLocalization.format("Profile is incomplete: %@", validationMessage))
             return
@@ -422,73 +467,164 @@ public final class ClientViewModel: ObservableObject {
         }
 
         status = .starting
-        appendLog(AppLocalization.format("Connecting: %@.", selectedProfileName))
+        #if os(iOS)
+        beginDiagnosticSession(for: profileToStart, mode: useSystemProxy ? "packetTunnel" : "localSocks")
+        #else
+        beginDiagnosticSession(for: profileToStart, mode: "localSocks")
+        #endif
+        appendLog(AppLocalization.format("Connecting: %@.", selectedProfileName), level: .checkpoint)
 
         startTask = Task { [weak self] in
             guard let self else { return }
+            await self.runLocalProxyConnect(profile: profileToStart, isReconnect: false)
+        }
+    }
 
-            do {
-                if let subscriptionID = profileToStart.subscription?.id,
-                   profileToStart.subscription?.sourceURL != nil {
-                    appendLog("checkpoint: sub refresh before start")
-                    if let refreshTask = startSubscriptionRefresh(subscriptionID, trigger: .manual) {
-                        await refreshTask.value
-                    }
-                    if let refreshed = profiles.first(where: { $0.id == profileToStart.id }) {
-                        profileToStart = refreshed
-                        draft = refreshed
-                    } else if let selectedID = selectedProfileID,
-                              let selected = profiles.first(where: { $0.id == selectedID }) {
-                        profileToStart = selected
-                        draft = selected
-                    }
-                    let expires = profileToStart.subscription?.accessExpiresAtUtc ?? "unknown"
-                    appendLog(
-                        "checkpoint: profile applied device=\(profileToStart.clientID) expires=\(expires) jwt=\(profileToStart.accessToken.isEmpty ? "missing" : "present") carrierAuth=\(profileToStart.carrierAuthToken.isEmpty ? "missing" : "present")"
-                    )
-                    if let validationMessage = validate(profile: profileToStart) {
-                        status = .failed(validationMessage)
-                        appendLog(AppLocalization.format("Profile is incomplete: %@", validationMessage))
-                        return
-                    }
+    private func runLocalProxyConnect(profile: ConnectionProfile, isReconnect: Bool) async {
+        var profileToStart = profile
+        do {
+            if let subscriptionID = profileToStart.subscription?.id,
+               profileToStart.subscription?.sourceURL != nil {
+                appendLog("checkpoint: sub refresh before start", level: .checkpoint)
+                if let refreshTask = startSubscriptionRefresh(subscriptionID, trigger: .manual) {
+                    await refreshTask.value
                 }
-
-                #if os(iOS)
-                if useSystemProxy {
-                    startPacketTunnel(profile: profileToStart)
-                    return
+                if let refreshed = profiles.first(where: { $0.id == profileToStart.id }) {
+                    profileToStart = refreshed
+                    draft = refreshed
+                } else if let selectedID = selectedProfileID,
+                          let selected = profiles.first(where: { $0.id == selectedID }) {
+                    profileToStart = selected
+                    draft = selected
                 }
-                #endif
-
-                let options = OlcRTCStartOptions(profile: profileToStart)
-                runningMode = .localProxy
+                let expires = profileToStart.subscription?.accessExpiresAtUtc ?? "unknown"
                 appendLog(
-                    "checkpoint: MobileStart carrier=\(options.carrierName) transport=\(options.transportName) room=\(options.roomID) socks=\(options.socksPort) jwt=\(options.accessToken.isEmpty ? "missing" : "present") carrierAuth=\(options.carrierAuthToken.isEmpty ? "missing" : "present")"
+                    "checkpoint: profile applied device=\(profileToStart.clientID) expires=\(expires) jwt=\(profileToStart.accessToken.isEmpty ? "missing" : "present") carrierAuth=\(profileToStart.carrierAuthToken.isEmpty ? "missing" : "present")",
+                    level: .checkpoint
                 )
-                let activePort = try await startEngineUntilReady(options: options)
-                status = .ready
-                appendLog(AppLocalization.format("SOCKS proxy is ready on 127.0.0.1:%d.", activePort))
-                appendLog("checkpoint: SOCKS ready port=\(activePort)")
-                #if os(iOS)
-                startLocalProxyBackgroundRuntime()
-                #endif
-                await enableSystemProxyIfNeeded(port: activePort)
-            } catch {
-                if error is CancellationError {
-                    await engine.stop()
+                if let validationMessage = validate(profile: profileToStart) {
+                    wantsConnection = false
+                    status = .failed(validationMessage)
+                    appendLog(AppLocalization.format("Profile is incomplete: %@", validationMessage), level: .error)
+                    flushDiagnostics(reason: "validation")
                     return
                 }
+            }
 
-                runningMode = nil
-                status = .failed(error.localizedDescription)
-                appendLog(AppLocalization.format("Could not connect: %@", error.localizedDescription))
-                appendLog("checkpoint: WaitReady/error \(error.localizedDescription)")
-                #if os(iOS)
-                backgroundRuntimeKeeper.stop()
-                #endif
+            #if os(iOS)
+            if useSystemProxy {
+                startPacketTunnel(profile: profileToStart)
+                return
+            }
+            #endif
+
+            let options = OlcRTCStartOptions(profile: profileToStart)
+            runningMode = .localProxy
+            beginDiagnosticSession(for: profileToStart, mode: "localSocks")
+            appendLog(
+                "checkpoint: MobileStart carrier=\(options.carrierName) transport=\(options.transportName) room=\(options.roomID) socks=\(options.socksPort) jwt=\(options.accessToken.isEmpty ? "missing" : "present") carrierAuth=\(options.carrierAuthToken.isEmpty ? "missing" : "present")",
+                level: .checkpoint
+            )
+            let activePort = try await startEngineUntilReady(options: options)
+            guard wantsConnection, !Task.isCancelled else {
                 await engine.stop()
+                return
+            }
+            status = .ready
+            reconnectAttempt = 0
+            appendLog(AppLocalization.format("SOCKS proxy is ready on 127.0.0.1:%d.", activePort))
+            appendLog("checkpoint: SOCKS ready port=\(activePort)", level: .checkpoint)
+            appendLog(
+                "checkpoint: Happ → SOCKS5 127.0.0.1:\(activePort) — в журнале будут строки socks: accept/request/tunnel",
+                level: .checkpoint
+            )
+            if isReconnect {
+                appendLog("checkpoint: auto-reconnect succeeded", level: .checkpoint)
+            }
+            startDiagnosticsUpload(for: profileToStart, mode: "localSocks")
+            #if os(iOS)
+            startLocalProxyBackgroundRuntime()
+            #endif
+            await enableSystemProxyIfNeeded(port: activePort)
+            startLinkWatchIfNeeded()
+        } catch {
+            if error is CancellationError {
+                await engine.stop()
+                return
+            }
+
+            runningMode = nil
+            #if os(iOS)
+            backgroundRuntimeKeeper.stop()
+            #endif
+            await engine.stop()
+
+            if wantsConnection {
+                appendLog(AppLocalization.format("Could not connect: %@", error.localizedDescription), level: .error)
+                appendLog("checkpoint: WaitReady/error \(error.localizedDescription)", level: .error)
+                flushDiagnostics(reason: "waitready_error")
+                await scheduleAutoReconnect(afterFailure: true)
+                return
+            }
+
+            status = .failed(error.localizedDescription)
+            appendLog(AppLocalization.format("Could not connect: %@", error.localizedDescription), level: .error)
+            appendLog("checkpoint: WaitReady/error \(error.localizedDescription)", level: .error)
+            flushDiagnostics(reason: "connect_failed")
+        }
+    }
+
+    private func startLinkWatchIfNeeded() {
+        #if os(iOS)
+        guard runningMode == .localProxy else { return }
+        #else
+        guard runningMode == .localProxy else { return }
+        #endif
+        linkWatchTask?.cancel()
+        linkWatchTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: linkWatchIntervalNanoseconds)
+                guard !Task.isCancelled, wantsConnection else { return }
+                guard runningMode == .localProxy, status == .ready else { continue }
+                let running = await engine.isRunning
+                if running {
+                    reconnectAttempt = 0
+                    continue
+                }
+                appendLog("checkpoint: engine stopped while Connected — auto-reconnect", level: .warn)
+                flushDiagnostics(reason: "link_drop")
+                await scheduleAutoReconnect(afterFailure: false)
+                return
             }
         }
+    }
+
+    private func scheduleAutoReconnect(afterFailure: Bool) async {
+        guard wantsConnection else { return }
+
+        reconnectAttempt += 1
+        let exponent = min(reconnectAttempt, 5)
+        let backoff = min(reconnectBackoffCapSeconds, pow(2.0, Double(exponent)))
+        status = .starting
+        runningMode = .localProxy
+        appendLog(
+            "checkpoint: auto-reconnect attempt=\(reconnectAttempt) backoff=\(Int(backoff))s",
+            level: .checkpoint
+        )
+        #if os(iOS)
+        backgroundRuntimeKeeper.stop()
+        #endif
+        await engine.stop()
+        try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
+        guard wantsConnection, !Task.isCancelled else { return }
+
+        var profile = draft.normalizedForCurrentDefaults()
+        if let selectedID = selectedProfileID,
+           let selected = profiles.first(where: { $0.id == selectedID }) {
+            profile = selected
+        }
+        await runLocalProxyConnect(profile: profile, isReconnect: true)
     }
 
     private func startEngineUntilReady(options: OlcRTCStartOptions) async throws -> Int {
@@ -543,9 +679,15 @@ public final class ClientViewModel: ObservableObject {
     }
 
     public func stop() {
+        wantsConnection = false
+        reconnectAttempt = 0
         startTask?.cancel()
+        linkWatchTask?.cancel()
+        linkWatchTask = nil
         status = .stopping
-        appendLog(AppLocalization.format("Disconnecting: %@.", selectedProfileName))
+        appendLog(AppLocalization.format("Disconnecting: %@.", selectedProfileName), level: .checkpoint)
+        flushDiagnostics(reason: "disconnect")
+        diagnosticUploader.stopPeriodicUpload()
 
         Task { [weak self] in
             guard let self else { return }
@@ -553,7 +695,7 @@ public final class ClientViewModel: ObservableObject {
             #if os(iOS)
             case .packetTunnel:
                 await packetTunnelManager.stop()
-                appendLog(AppLocalization.string("iOS VPN tunnel stopped."))
+                appendLog(AppLocalization.string("iOS VPN tunnel stopped."), level: .checkpoint)
             #endif
             case .localProxy, nil:
                 #if os(iOS)
@@ -564,10 +706,14 @@ public final class ClientViewModel: ObservableObject {
             }
             runningMode = nil
             status = .stopped
+            DiagnosticJournal.shared.clearSession()
         }
     }
 
     public func shutdownForAppTermination() {
+        wantsConnection = false
+        linkWatchTask?.cancel()
+        flushDiagnostics(reason: "app_terminate")
         guard status.isRunning || runningMode != nil else {
             return
         }
@@ -575,6 +721,7 @@ public final class ClientViewModel: ObservableObject {
     }
 
     public func clearLogs() {
+        DiagnosticJournal.shared.clearUI()
         logs.removeAll()
     }
 
@@ -1110,13 +1257,79 @@ public final class ClientViewModel: ObservableObject {
         }
     }
 
-    private func appendLog(_ message: String) {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss.SSS"
-        let redacted = DiagnosticLogRedactor.redact(message)
-        logs.append("[\(formatter.string(from: Date()))] \(redacted)")
-        if logs.count > 500 {
-            logs.removeFirst(logs.count - 500)
+    private func appendLog(_ message: String, level: DiagnosticLogLevel = .info) {
+        let resolvedLevel: DiagnosticLogLevel
+        if level == .info, message.hasPrefix("checkpoint:") {
+            resolvedLevel = .checkpoint
+        } else {
+            resolvedLevel = level
+        }
+        DiagnosticJournal.shared.append(message, level: resolvedLevel)
+        logs = DiagnosticJournal.shared.recentUILines()
+    }
+
+    private func beginDiagnosticSession(for profile: ConnectionProfile, mode: String) {
+        let sessionId = diagnosticSessionId ?? UUID()
+        diagnosticSessionId = sessionId
+        DiagnosticJournal.shared.configureSession(
+            sessionId: sessionId,
+            mode: mode,
+            deviceId: profile.clientID
+        )
+    }
+
+    private func startDiagnosticsUpload(for profile: ConnectionProfile, mode: String) {
+        guard sendDiagnostics else {
+            diagnosticUploader.stopPeriodicUpload()
+            return
+        }
+        let sessionId = diagnosticSessionId ?? UUID()
+        diagnosticSessionId = sessionId
+        let subscriptionURL = profile.subscription?.sourceURL.flatMap(URL.init(string:))
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+        #if os(iOS)
+        let platform = "ios"
+        #else
+        let platform = "macos"
+        #endif
+        diagnosticUploader.updateContext(
+            DiagnosticLogUploadContext(
+                accessToken: profile.accessToken,
+                deviceId: profile.clientID,
+                sessionId: sessionId,
+                mode: mode,
+                uploadURL: DiagnosticLogUploader.uploadURL(fromSubscriptionURL: subscriptionURL),
+                appVersion: appVersion,
+                build: build,
+                platform: platform
+            )
+        )
+        diagnosticUploader.setEnabled(true)
+        diagnosticUploader.startPeriodicUpload(intervalSeconds: 60)
+        diagnosticUploader.uploadNow(reason: "connected")
+    }
+
+    private func flushDiagnostics(reason: String) {
+        guard sendDiagnostics else { return }
+        let profile = profiles.first(where: { $0.id == selectedProfileID }) ?? draft
+        if !profile.accessToken.isEmpty {
+            let mode: String
+            #if os(iOS)
+            mode = runningMode == .packetTunnel ? "packetTunnel" : "localSocks"
+            #else
+            mode = "localSocks"
+            #endif
+            startDiagnosticsUpload(for: profile, mode: mode)
+        }
+        diagnosticUploader.uploadNow(reason: reason)
+    }
+
+    private func handleAppBecameActive() {
+        DiagnosticJournal.shared.mergeSharedLogIntoUI()
+        logs = DiagnosticJournal.shared.recentUILines()
+        if sendDiagnostics, status == .ready {
+            diagnosticUploader.uploadNow(reason: "foreground")
         }
     }
 
@@ -1154,7 +1367,9 @@ public final class ClientViewModel: ObservableObject {
     private func startPacketTunnel(profile: ConnectionProfile) {
         status = .starting
         runningMode = .packetTunnel
-        appendLog(AppLocalization.format("Connecting %@ through iOS VPN.", selectedProfileName))
+        beginDiagnosticSession(for: profile, mode: "packetTunnel")
+        appendLog(AppLocalization.format("Connecting %@ through iOS VPN.", selectedProfileName), level: .checkpoint)
+        appendLog("checkpoint: VPN startTunnel requested", level: .checkpoint)
 
         startTask = Task { [weak self] in
             guard let self else { return }
@@ -1162,7 +1377,13 @@ public final class ClientViewModel: ObservableObject {
             do {
                 try await packetTunnelManager.start(profile: profile)
                 status = .ready
-                appendLog(AppLocalization.string("iOS VPN tunnel connected. System traffic is routed through olcRTC."))
+                appendLog(
+                    AppLocalization.string("iOS VPN tunnel connected. System traffic is routed through olcRTC."),
+                    level: .checkpoint
+                )
+                DiagnosticJournal.shared.mergeSharedLogIntoUI()
+                logs = DiagnosticJournal.shared.recentUILines()
+                startDiagnosticsUpload(for: profile, mode: "packetTunnel")
             } catch {
                 if error is CancellationError {
                     await packetTunnelManager.stop()
@@ -1171,9 +1392,12 @@ public final class ClientViewModel: ObservableObject {
 
                 runningMode = nil
                 status = .failed(error.localizedDescription)
-                appendLog(AppLocalization.format("Could not start VPN: %@", vpnStartFailureMessage(error)))
-                await packetTunnelManager.stop()
-            }
+                appendLog(
+                    AppLocalization.format("Could not start VPN: %@", vpnStartFailureMessage(error)),
+                    level: .error
+                )
+                flushDiagnostics(reason: "vpn_start_failed")
+                await packetTunnelManager.stop()            }
         }
     }
 

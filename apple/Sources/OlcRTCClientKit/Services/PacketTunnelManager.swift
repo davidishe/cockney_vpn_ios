@@ -30,7 +30,7 @@ public final class PacketTunnelManager {
     ) {
         self.providerBundleIdentifier = providerBundleIdentifier
             ?? Bundle.main.bundleIdentifier.map { "\($0).PacketTunnel" }
-            ?? "community.openlibre.olcrtc.ios.PacketTunnel"
+            ?? "space.tokenova.cockney.ios.PacketTunnel"
         self.localizedDescription = localizedDescription
     }
 
