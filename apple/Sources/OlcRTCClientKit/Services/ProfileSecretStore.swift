@@ -63,12 +63,30 @@ public final class ProfileSecretStore {
 
         for profile in profiles {
             let fields = secretFields(from: profile)
-            guard !fields.isEmpty else {
-                continue
+            var entry = secrets[profile.id] ?? [:]
+            let before = entry
+            entry.merge(fields) { _, new in new }
+            // Drop cleared secrets so a refresh can remove a stale carrier token.
+            if profile.carrierAuthToken.isEmpty {
+                entry.removeValue(forKey: carrierAuthTokenField)
             }
-
-            secrets[profile.id, default: [:]].merge(fields) { _, new in new }
-            didChange = true
+            if profile.accessToken.isEmpty {
+                entry.removeValue(forKey: accessTokenField)
+            }
+            if profile.keyHex.isEmpty {
+                entry.removeValue(forKey: keyHexField)
+            }
+            if profile.socksPass.isEmpty {
+                entry.removeValue(forKey: socksPassField)
+            }
+            if entry != before {
+                if entry.isEmpty {
+                    secrets.removeValue(forKey: profile.id)
+                } else {
+                    secrets[profile.id] = entry
+                }
+                didChange = true
+            }
         }
 
         guard didChange else {

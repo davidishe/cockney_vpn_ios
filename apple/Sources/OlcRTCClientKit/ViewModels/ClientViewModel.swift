@@ -1252,10 +1252,6 @@ public final class ClientViewModel: ObservableObject {
            profile.accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "Cockney access token is missing. Re-import the subscription URL."
         }
-        if profile.carrier == .vkcalls,
-           profile.carrierAuthToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "VK Calls carrier auth token is missing. Refresh the Cockney subscription (needs backend with carrierAuthToken)."
-        }
         if profile.roomID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return profile.carrier == .jitsi
                 ? AppLocalization.string("Enter a Room URL for Jitsi.")
