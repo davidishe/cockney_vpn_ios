@@ -412,6 +412,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 log("checkpoint: tun2socks running attempt=\(attempt)", level: .checkpoint)
                 startTun2SocksStatsProbe()
                 startTun2SocksLogProbe()
+                Task.detached(priority: .utility) { [weak self] in
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    self?.runRoutingProbe()
+                }
                 return
             }
 
@@ -440,6 +444,64 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
             }
         }
+    }
+
+    /// Sockets opened here are subject to the system routing table, so an unprotected
+    /// connect proves whether the default route actually points into the tunnel:
+    /// tun2socks sees the SYN when it does, and nothing at all when it does not.
+    private func runRoutingProbe() {
+        let probeIP = "1.1.1.1"
+        let probePort: UInt16 = 80
+
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else {
+            log("checkpoint: routing probe socket failed errno=\(errno)", level: .checkpoint)
+            return
+        }
+        defer { close(fd) }
+
+        var flags = fcntl(fd, F_GETFL, 0)
+        flags |= O_NONBLOCK
+        _ = fcntl(fd, F_SETFL, flags)
+
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = probePort.bigEndian
+        inet_pton(AF_INET, probeIP, &addr.sin_addr)
+
+        let result = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        if result == 0 {
+            log("checkpoint: routing probe \(probeIP):\(probePort) connected immediately", level: .checkpoint)
+            return
+        }
+        guard errno == EINPROGRESS else {
+            log("checkpoint: routing probe connect failed errno=\(errno)", level: .checkpoint)
+            return
+        }
+
+        var writeSet = fd_set()
+        withUnsafeMutablePointer(to: &writeSet) { bzero($0, MemoryLayout<fd_set>.size) }
+        __darwin_fd_set(fd, &writeSet)
+        var timeout = timeval(tv_sec: 5, tv_usec: 0)
+        let ready = select(fd + 1, nil, &writeSet, nil, &timeout)
+
+        if ready == 0 {
+            log("checkpoint: routing probe \(probeIP):\(probePort) TIMED OUT", level: .checkpoint)
+            return
+        }
+
+        var soError: Int32 = 0
+        var len = socklen_t(MemoryLayout<Int32>.size)
+        getsockopt(fd, SOL_SOCKET, SO_ERROR, &soError, &len)
+        log(
+            "checkpoint: routing probe \(probeIP):\(probePort) \(soError == 0 ? "connected" : "failed err=\(soError)")",
+            level: .checkpoint
+        )
     }
 
     private func startTun2SocksLogProbe() {
