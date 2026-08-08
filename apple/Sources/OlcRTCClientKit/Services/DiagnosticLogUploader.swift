@@ -35,6 +35,7 @@ public enum DiagnosticLogUploaderError: Error {
     case unauthorized
     case httpStatus(Int)
     case encoding
+    case emptyToken
 }
 
 /// Periodically drains DiagnosticJournal pending lines to RU API.
@@ -66,13 +67,13 @@ public final class DiagnosticLogUploader: @unchecked Sendable {
         queue.sync { self.context = context }
     }
 
-    public func startPeriodicUpload(intervalSeconds: TimeInterval = 60) {
+    public func startPeriodicUpload(intervalSeconds: TimeInterval = 30) {
         queue.async {
             self.timer?.cancel()
             let timer = DispatchSource.makeTimerSource(queue: self.queue)
-            timer.schedule(deadline: .now() + 5, repeating: intervalSeconds)
+            timer.schedule(deadline: .now() + 3, repeating: intervalSeconds)
             timer.setEventHandler { [weak self] in
-                self?.uploadIfNeeded()
+                self?.uploadIfNeeded(reason: "timer")
             }
             self.timer = timer
             timer.resume()
@@ -88,10 +89,7 @@ public final class DiagnosticLogUploader: @unchecked Sendable {
 
     public func uploadNow(reason: String = "manual") {
         queue.async {
-            if reason != "timer" {
-                self.journal.append("checkpoint: diagnostics upload trigger=\(reason)", level: .checkpoint)
-            }
-            self.uploadIfNeeded()
+            self.uploadIfNeeded(reason: reason)
         }
     }
 
@@ -108,11 +106,55 @@ public final class DiagnosticLogUploader: @unchecked Sendable {
         return URL(string: "https://cockney.tokenova.space/api/olcrtc/diagnostics/logs")!
     }
 
-    private func uploadIfNeeded() {
-        guard enabled, !inFlight, let context else { return }
+    public static func makeContext(
+        accessToken: String,
+        deviceId: String,
+        sessionId: UUID,
+        mode: String,
+        subscriptionURL: URL? = nil
+    ) -> DiagnosticLogUploadContext {
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+        #if os(iOS)
+        let platform = "ios"
+        #else
+        let platform = "macos"
+        #endif
+        return DiagnosticLogUploadContext(
+            accessToken: accessToken,
+            deviceId: deviceId,
+            sessionId: sessionId,
+            mode: mode,
+            uploadURL: uploadURL(fromSubscriptionURL: subscriptionURL),
+            appVersion: appVersion,
+            build: build,
+            platform: platform
+        )
+    }
+
+    private func uploadIfNeeded(reason: String) {
+        guard enabled, !inFlight else { return }
+        guard let context else {
+            if reason != "timer" {
+                journal.append("checkpoint: diagnostics upload skipped reason=\(reason) (no context)", level: .warn)
+            }
+            return
+        }
+        guard !context.accessToken.isEmpty else {
+            journal.append("checkpoint: diagnostics upload skipped reason=\(reason) (empty jwt)", level: .warn)
+            return
+        }
+
         let batch = journal.drainPending(limit: 100)
         guard !batch.isEmpty else { return }
         inFlight = true
+
+        if reason != "timer" {
+            journal.append(
+                "checkpoint: diagnostics upload start reason=\(reason) lines=\(batch.count)",
+                level: .checkpoint
+            )
+        }
 
         Task {
             do {
@@ -121,18 +163,40 @@ public final class DiagnosticLogUploader: @unchecked Sendable {
                     self.consecutiveFailures = 0
                     self.inFlight = false
                 }
+                self.journal.append(
+                    "checkpoint: diagnostics upload ok reason=\(reason) lines=\(batch.count)",
+                    level: .checkpoint
+                )
             } catch DiagnosticLogUploaderError.unauthorized {
                 journal.requeue(batch)
                 queue.async {
                     self.consecutiveFailures += 1
                     self.inFlight = false
                 }
+                self.journal.append(
+                    "checkpoint: diagnostics upload 401/403 reason=\(reason)",
+                    level: .error
+                )
+            } catch DiagnosticLogUploaderError.httpStatus(let code) {
+                journal.requeue(batch)
+                queue.async {
+                    self.consecutiveFailures += 1
+                    self.inFlight = false
+                }
+                self.journal.append(
+                    "checkpoint: diagnostics upload http=\(code) reason=\(reason)",
+                    level: .error
+                )
             } catch {
                 journal.requeue(batch)
                 queue.async {
                     self.consecutiveFailures += 1
                     self.inFlight = false
                 }
+                self.journal.append(
+                    "checkpoint: diagnostics upload failed reason=\(reason) err=\(error.localizedDescription)",
+                    level: .error
+                )
             }
         }
     }

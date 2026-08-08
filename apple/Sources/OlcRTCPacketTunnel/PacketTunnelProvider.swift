@@ -41,9 +41,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 log("checkpoint: tunnel settings applied addr=\(Constants.tunnelAddress)", level: .checkpoint)
                 try await startTun2Socks(configuration: configuration)
                 log("checkpoint: tun2socks started", level: .checkpoint)
+                startDiagnosticsUpload(configuration: configuration, sessionId: sessionId)
                 completionHandler(nil)
             } catch {
                 log("checkpoint: VPN start failed \(error.localizedDescription)", level: .error)
+                startDiagnosticsUpload(configuration: configurationIfPossible(options: options), sessionId: UUID())
+                DiagnosticLogUploader.shared.uploadNow(reason: "tunnel_start_failed")
                 completionHandler(error)
                 await stopRuntime()
             }
@@ -56,9 +59,42 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     ) {
         Task {
             log("checkpoint: VPN extension stopTunnel reason=\(reason.rawValue)", level: .checkpoint)
+            DiagnosticLogUploader.shared.uploadNow(reason: "tunnel_stop")
+            DiagnosticLogUploader.shared.stopPeriodicUpload()
+            // Give the last upload a moment before tearing down networking.
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
             await stopRuntime()
             completionHandler()
         }
+    }
+
+    private func configurationIfPossible(options: [String: NSObject]?) -> PacketTunnelConfiguration? {
+        try? PacketTunnelConfiguration(
+            providerConfiguration: (protocolConfiguration as? NETunnelProviderProtocol)?.providerConfiguration,
+            startOptions: options
+        )
+    }
+
+    private func startDiagnosticsUpload(configuration: PacketTunnelConfiguration?, sessionId: UUID) {
+        guard let configuration else { return }
+        let profile = configuration.connectionProfile
+        DiagnosticJournal.shared.configureSession(
+            sessionId: sessionId,
+            mode: "packetTunnel",
+            deviceId: profile.clientID
+        )
+        DiagnosticLogUploader.shared.updateContext(
+            DiagnosticLogUploader.makeContext(
+                accessToken: profile.accessToken,
+                deviceId: profile.clientID,
+                sessionId: sessionId,
+                mode: "packetTunnel",
+                subscriptionURL: nil
+            )
+        )
+        DiagnosticLogUploader.shared.setEnabled(true)
+        DiagnosticLogUploader.shared.startPeriodicUpload(intervalSeconds: 30)
+        DiagnosticLogUploader.shared.uploadNow(reason: "tunnel_start")
     }
 
     private func startOlcRTC(configuration: PacketTunnelConfiguration) async throws {

@@ -20,14 +20,13 @@ let package = Package(
         .iOS(.v16),
         .macOS(.v13),
     ],
+    // macOS app lives in Godwit.xcodeproj (scheme "OlcRTCClient macOS"), not in this
+    // package product list — otherwise scheme "OlcRTCApple-Package" + iPhone tries to
+    // compile AppKit sources and fails with "No such module 'AppKit'".
     products: [
         .library(
             name: "OlcRTCClientKit",
             targets: ["OlcRTCClientKit"]
-        ),
-        .executable(
-            name: "OlcRTCClientMac",
-            targets: ["OlcRTCClientMac"]
         ),
     ],
     targets: [
@@ -40,11 +39,6 @@ let package = Package(
             linkerSettings: hasMobileFramework
                 ? [.linkedLibrary("resolv", .when(platforms: [.iOS]))]
                 : []
-        ),
-        .executableTarget(
-            name: "OlcRTCClientMac",
-            dependencies: ["OlcRTCClientKit"],
-            exclude: ["Assets.xcassets"]
         ),
         .testTarget(
             name: "OlcRTCClientKitTests",

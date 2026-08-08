@@ -1,8 +1,7 @@
 import Foundation
-#if canImport(UIKit)
+#if os(iOS)
 import UIKit
-#endif
-#if canImport(AppKit) && !canImport(UIKit)
+#elseif os(macOS)
 import AppKit
 #endif
 
@@ -151,14 +150,9 @@ public final class ClientViewModel: ObservableObject {
             enableSystemVPNByDefaultIfAvailable()
         }
         #endif
+        #if os(iOS)
         foregroundObserver = NotificationCenter.default.addObserver(
-            forName: {
-                #if os(iOS)
-                return UIApplication.willEnterForegroundNotification
-                #else
-                return NSApplication.didBecomeActiveNotification
-                #endif
-            }(),
+            forName: UIApplication.willEnterForegroundNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
@@ -166,6 +160,17 @@ public final class ClientViewModel: ObservableObject {
                 self?.handleAppBecameActive()
             }
         }
+        #elseif os(macOS)
+        foregroundObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.handleAppBecameActive()
+            }
+        }
+        #endif
     }
 
     deinit {
@@ -1286,27 +1291,17 @@ public final class ClientViewModel: ObservableObject {
         let sessionId = diagnosticSessionId ?? UUID()
         diagnosticSessionId = sessionId
         let subscriptionURL = profile.subscription?.sourceURL.flatMap(URL.init(string:))
-        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
-        #if os(iOS)
-        let platform = "ios"
-        #else
-        let platform = "macos"
-        #endif
         diagnosticUploader.updateContext(
-            DiagnosticLogUploadContext(
+            DiagnosticLogUploader.makeContext(
                 accessToken: profile.accessToken,
                 deviceId: profile.clientID,
                 sessionId: sessionId,
                 mode: mode,
-                uploadURL: DiagnosticLogUploader.uploadURL(fromSubscriptionURL: subscriptionURL),
-                appVersion: appVersion,
-                build: build,
-                platform: platform
+                subscriptionURL: subscriptionURL
             )
         )
         diagnosticUploader.setEnabled(true)
-        diagnosticUploader.startPeriodicUpload(intervalSeconds: 60)
+        diagnosticUploader.startPeriodicUpload(intervalSeconds: 30)
         diagnosticUploader.uploadNow(reason: "connected")
     }
 
