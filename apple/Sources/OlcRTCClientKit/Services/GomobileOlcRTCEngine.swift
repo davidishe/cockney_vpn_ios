@@ -87,6 +87,7 @@ public final class GomobileOlcRTCEngine: OlcRTCEngine {
             MobileSetTransport(options.transportName)
             MobileSetDNS(options.dnsServer)
             MobileSetVP8Options(options.vp8FPS, options.vp8BatchSize)
+            MobileSetAccessToken(options.accessToken)
             var error: NSError?
             let didStart = MobileStart(
                 options.carrierName,
@@ -103,7 +104,7 @@ public final class GomobileOlcRTCEngine: OlcRTCEngine {
             }
         }.value
     }
-    #endif
+#endif
 
     public func waitReady(timeoutMillis: Int) async throws {
         #if canImport(Mobile)

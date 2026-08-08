@@ -101,6 +101,7 @@ public struct ProfilePinger: ProfilePinging {
         let measured = try await Task.detached {
             var error: NSError?
             var result: Int64 = -1
+            MobileSetAccessToken(options.accessToken)
             let didPing = MobilePing(
                 options.carrierName,
                 options.transportName,

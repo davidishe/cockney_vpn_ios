@@ -8,6 +8,9 @@ import AppKit
 public struct LogView: View {
     let logs: [String]
     let onClear: () -> Void
+    #if os(iOS)
+    @State private var isSharing = false
+    #endif
 
     public init(logs: [String], onClear: @escaping () -> Void) {
         self.logs = logs
@@ -18,16 +21,24 @@ public struct LogView: View {
         VStack(spacing: 0) {
             HStack {
                 Label("Журнал", systemImage: "list.bullet.rectangle")
-                    #if os(iOS)
+                #if os(iOS)
                     .font(.subheadline.weight(.semibold))
-                    #else
+                #else
                     .font(.headline)
-                    #endif
+                #endif
                 Spacer()
                 Button(action: copyLogs) {
                     Label("Копировать", systemImage: "doc.on.doc")
                 }
                 .disabled(logs.isEmpty)
+                #if os(iOS)
+                Button {
+                    isSharing = true
+                } label: {
+                    Label("Поделиться", systemImage: "square.and.arrow.up")
+                }
+                .disabled(logs.isEmpty)
+                #endif
                 Button(action: onClear) {
                     Label("Очистить", systemImage: "trash")
                 }
@@ -64,11 +75,18 @@ public struct LogView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         #if os(iOS)
         .font(.subheadline)
+        .sheet(isPresented: $isSharing) {
+            ActivityView(activityItems: [logsText])
+        }
         #endif
     }
 
+    private var logsText: String {
+        logs.joined(separator: "\n")
+    }
+
     private func copyLogs() {
-        let text = logs.joined(separator: "\n")
+        let text = logsText
         #if os(iOS)
         UIPasteboard.general.string = text
         #elseif os(macOS)
@@ -77,3 +95,15 @@ public struct LogView: View {
         #endif
     }
 }
+
+#if os(iOS)
+private struct ActivityView: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+#endif

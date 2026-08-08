@@ -34,6 +34,10 @@ public struct OlcRTCSubscriptionParser {
     }
 
     public func parse(_ rawValue: String, sourceURL: URL? = nil) throws -> OlcRTCSubscriptionImport {
+        if CockneySubscriptionParser.looksLikeCockneyJSON(rawValue) {
+            return try CockneySubscriptionParser(uriParser: uriParser).parse(rawValue, sourceURL: sourceURL)
+        }
+
         var globalFields: [String: String] = [:]
         var servers: [ParsedServer] = []
         var currentServerIndex: Int?

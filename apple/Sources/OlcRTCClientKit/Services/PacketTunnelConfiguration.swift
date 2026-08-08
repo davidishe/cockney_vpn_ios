@@ -21,6 +21,7 @@ public struct PacketTunnelConfiguration: Equatable {
         static let roomID = "roomID"
         static let clientID = "clientID"
         static let keyHex = "keyHex"
+        static let accessToken = "accessToken"
         static let socksPort = "socksPort"
         static let socksUser = "socksUser"
         static let socksPass = "socksPass"
@@ -50,6 +51,7 @@ public struct PacketTunnelConfiguration: Equatable {
     public var roomID: String
     public var clientID: String
     public var keyHex: String
+    public var accessToken: String
     public var socksPort: Int
     public var socksUser: String
     public var socksPass: String
@@ -79,6 +81,7 @@ public struct PacketTunnelConfiguration: Equatable {
         roomID = profile.roomID
         clientID = profile.clientID
         keyHex = profile.keyHex
+        accessToken = profile.accessToken
         socksPort = profile.socksPort
         socksUser = profile.socksUser
         socksPass = profile.socksPass
@@ -114,6 +117,7 @@ public struct PacketTunnelConfiguration: Equatable {
         roomID = try Self.stringValue(Key.roomID, from: values)
         clientID = Self.optionalStringValue(Key.clientID, from: values)
         keyHex = try Self.stringValue(Key.keyHex, from: values)
+        accessToken = Self.optionalStringValue(Key.accessToken, from: values)
         socksPort = try Self.intValue(Key.socksPort, from: values)
         socksUser = Self.optionalStringValue(Key.socksUser, from: values)
         socksPass = Self.optionalStringValue(Key.socksPass, from: values)
@@ -150,6 +154,7 @@ public struct PacketTunnelConfiguration: Equatable {
             Key.roomID: roomID as NSString,
             Key.clientID: clientID as NSString,
             Key.keyHex: keyHex as NSString,
+            Key.accessToken: accessToken as NSString,
             Key.socksPort: socksPort as NSNumber,
             Key.socksUser: socksUser as NSString,
             Key.socksPass: socksPass as NSString,
@@ -212,6 +217,7 @@ public struct PacketTunnelConfiguration: Equatable {
             roomID: roomID,
             clientID: clientID,
             keyHex: keyHex,
+            accessToken: accessToken,
             socksPort: socksPort,
             socksUser: socksUser,
             socksPass: socksPass,

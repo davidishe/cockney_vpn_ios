@@ -257,8 +257,8 @@
 			projectRoot = "";
 			targets = (
 				D21B4EC9BE3DA01BF59FC886 /* OlcRTCClient iOS */,
-				C2E413E007C5452A1F648CC2 /* OlcRTCClient macOS */,
 				862BFEBD42D77F6FDAFF2E95 /* OlcRTCPacketTunnel */,
+				C2E413E007C5452A1F648CC2 /* OlcRTCClient macOS */,
 			);
 		};
 /* End PBXProject section */
@@ -396,7 +396,7 @@
 					"@executable_path/Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = community.openlibre.olcrtc.ios;
-				PRODUCT_NAME = Godwit;
+				PRODUCT_NAME = Cockney;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -408,7 +408,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Godwit;
+				INFOPLIST_KEY_CFBundleDisplayName = Cockney;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -416,7 +416,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				PRODUCT_BUNDLE_IDENTIFIER = community.openlibre.olcrtc.macos;
-				PRODUCT_NAME = Godwit;
+				PRODUCT_NAME = Cockney;
 				SDKROOT = macosx;
 			};
 			name = Debug;
@@ -427,7 +427,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Godwit;
+				INFOPLIST_KEY_CFBundleDisplayName = Cockney;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -435,7 +435,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				PRODUCT_BUNDLE_IDENTIFIER = community.openlibre.olcrtc.macos;
-				PRODUCT_NAME = Godwit;
+				PRODUCT_NAME = Cockney;
 				SDKROOT = macosx;
 			};
 			name = Release;
@@ -453,7 +453,7 @@
 					"@executable_path/Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = community.openlibre.olcrtc.ios;
-				PRODUCT_NAME = Godwit;
+				PRODUCT_NAME = Cockney;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};

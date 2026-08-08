@@ -36,6 +36,7 @@ public final class ProfileStore {
             var profile = profile
             profile.keyHex = ""
             profile.socksPass = ""
+            profile.accessToken = ""
             return profile
         }
 

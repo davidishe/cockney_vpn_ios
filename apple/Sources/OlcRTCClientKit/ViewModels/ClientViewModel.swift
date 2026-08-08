@@ -400,7 +400,7 @@ public final class ClientViewModel: ObservableObject {
         saveDraft()
         startTask?.cancel()
 
-        let profileToStart = draft.normalizedForCurrentDefaults()
+        var profileToStart = draft.normalizedForCurrentDefaults()
         if profileToStart != draft {
             draft = profileToStart
             saveDraft()
@@ -421,25 +421,54 @@ public final class ClientViewModel: ObservableObject {
             )
         }
 
-        #if os(iOS)
-        if useSystemProxy {
-            startPacketTunnel(profile: profileToStart)
-            return
-        }
-        #endif
-
-        let options = OlcRTCStartOptions(profile: profileToStart)
         status = .starting
-        runningMode = .localProxy
         appendLog(AppLocalization.format("Connecting: %@.", selectedProfileName))
 
         startTask = Task { [weak self] in
             guard let self else { return }
 
             do {
+                if let subscriptionID = profileToStart.subscription?.id,
+                   profileToStart.subscription?.sourceURL != nil {
+                    appendLog("checkpoint: sub refresh before start")
+                    if let refreshTask = startSubscriptionRefresh(subscriptionID, trigger: .manual) {
+                        await refreshTask.value
+                    }
+                    if let refreshed = profiles.first(where: { $0.id == profileToStart.id }) {
+                        profileToStart = refreshed
+                        draft = refreshed
+                    } else if let selectedID = selectedProfileID,
+                              let selected = profiles.first(where: { $0.id == selectedID }) {
+                        profileToStart = selected
+                        draft = selected
+                    }
+                    let expires = profileToStart.subscription?.accessExpiresAtUtc ?? "unknown"
+                    appendLog(
+                        "checkpoint: profile applied device=\(profileToStart.clientID) expires=\(expires) jwt=\(profileToStart.accessToken.isEmpty ? "missing" : "present")"
+                    )
+                    if let validationMessage = validate(profile: profileToStart) {
+                        status = .failed(validationMessage)
+                        appendLog(AppLocalization.format("Profile is incomplete: %@", validationMessage))
+                        return
+                    }
+                }
+
+                #if os(iOS)
+                if useSystemProxy {
+                    startPacketTunnel(profile: profileToStart)
+                    return
+                }
+                #endif
+
+                let options = OlcRTCStartOptions(profile: profileToStart)
+                runningMode = .localProxy
+                appendLog(
+                    "checkpoint: MobileStart carrier=\(options.carrierName) transport=\(options.transportName) room=\(options.roomID) socks=\(options.socksPort) jwt=\(options.accessToken.isEmpty ? "missing" : "present")"
+                )
                 let activePort = try await startEngineUntilReady(options: options)
                 status = .ready
                 appendLog(AppLocalization.format("SOCKS proxy is ready on 127.0.0.1:%d.", activePort))
+                appendLog("checkpoint: SOCKS ready port=\(activePort)")
                 #if os(iOS)
                 startLocalProxyBackgroundRuntime()
                 #endif
@@ -453,6 +482,7 @@ public final class ClientViewModel: ObservableObject {
                 runningMode = nil
                 status = .failed(error.localizedDescription)
                 appendLog(AppLocalization.format("Could not connect: %@", error.localizedDescription))
+                appendLog("checkpoint: WaitReady/error \(error.localizedDescription)")
                 #if os(iOS)
                 backgroundRuntimeKeeper.stop()
                 #endif
@@ -651,6 +681,12 @@ public final class ClientViewModel: ObservableObject {
         persistProfiles()
         rescheduleAutomaticSubscriptionRefreshes()
         appendLog(AppLocalization.format("Imported subscription %@: %d server(s).", imported.name, importedProfiles.count))
+        if let first = importedProfiles.first {
+            let expires = first.subscription?.accessExpiresAtUtc ?? "n/a"
+            appendLog(
+                "checkpoint: sub fetch ok device=\(first.clientID) expires=\(expires) jwt=\(first.accessToken.isEmpty ? "missing" : "present") socks=\(first.socksPort)"
+            )
+        }
     }
 
     private func refreshSubscription(
@@ -1044,7 +1080,8 @@ public final class ClientViewModel: ObservableObject {
     }
 
     private func fetchSubscription(from url: URL) async throws -> String {
-        appendLog(AppLocalization.format("Loading subscription: %@.", url.absoluteString))
+        appendLog(AppLocalization.format("Loading subscription: %@.", DiagnosticLogRedactor.redactURL(url)))
+        appendLog("checkpoint: sub fetch")
         do {
             return try await subscriptionFetcher.fetchWithURLSession(from: url)
         } catch {
@@ -1075,10 +1112,11 @@ public final class ClientViewModel: ObservableObject {
 
     private func appendLog(_ message: String) {
         let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss"
-        logs.append("[\(formatter.string(from: Date()))] \(message)")
-        if logs.count > 300 {
-            logs.removeFirst(logs.count - 300)
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        let redacted = DiagnosticLogRedactor.redact(message)
+        logs.append("[\(formatter.string(from: Date()))] \(redacted)")
+        if logs.count > 500 {
+            logs.removeFirst(logs.count - 500)
         }
     }
 
@@ -1208,6 +1246,11 @@ public final class ClientViewModel: ObservableObject {
         }
         if profile.keyHex.count != 64 || !profile.keyHex.allSatisfy(\.isHexDigit) {
             return AppLocalization.string("The key must contain 64 hexadecimal characters.")
+        }
+        let sourceURL = profile.subscription?.sourceURL ?? ""
+        if sourceURL.contains("/api/olcrtc/subscriptions/"),
+           profile.accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Cockney access token is missing. Re-import the subscription URL."
         }
         if profile.roomID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return profile.carrier == .jitsi

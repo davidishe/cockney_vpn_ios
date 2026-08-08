@@ -16,6 +16,11 @@ struct OlcRTCConfigYAMLBuilder {
         lines.append("  id: \(yamlString(options.roomID))")
         lines.append("crypto:")
         lines.append("  key: \(yamlString(options.keyHex))")
+        if !options.accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lines.append("client:")
+            appendIfPresent("  device_id", options.clientID, to: &lines)
+            appendIfPresent("  access_token", options.accessToken, to: &lines)
+        }
         lines.append("net:")
         lines.append("  transport: \(yamlString(options.transportName))")
         appendIfPresent("  dns", options.dnsServer, to: &lines)

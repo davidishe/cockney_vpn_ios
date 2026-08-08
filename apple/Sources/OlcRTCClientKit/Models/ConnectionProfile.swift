@@ -59,6 +59,8 @@ public struct ConnectionProfile: Codable, Equatable, Identifiable {
     public var roomID: String
     public var clientID: String
     public var keyHex: String
+    /// Cockney multi-user JWT for CLIENT_HELLO. Stored in Keychain, not UserDefaults.
+    public var accessToken: String
     public var socksPort: Int
     public var socksUser: String
     public var socksPass: String
@@ -91,6 +93,7 @@ public struct ConnectionProfile: Codable, Equatable, Identifiable {
         roomID: String = "",
         clientID: String = "",
         keyHex: String = "",
+        accessToken: String = "",
         socksPort: Int = Self.defaultSocksPort,
         socksUser: String = "",
         socksPass: String = "",
@@ -122,6 +125,7 @@ public struct ConnectionProfile: Codable, Equatable, Identifiable {
         self.roomID = roomID
         self.clientID = clientID
         self.keyHex = keyHex
+        self.accessToken = accessToken
         self.socksPort = Self.normalizedSocksPort(socksPort)
         self.socksUser = socksUser
         self.socksPass = socksPass
@@ -189,6 +193,7 @@ public struct ConnectionProfile: Codable, Equatable, Identifiable {
         roomID = try container.decodeIfPresent(String.self, forKey: .roomID) ?? ""
         clientID = try container.decodeIfPresent(String.self, forKey: .clientID) ?? ""
         keyHex = try container.decodeIfPresent(String.self, forKey: .keyHex) ?? ""
+        accessToken = ""
         let decodedSocksPort = try container.decodeIfPresent(Int.self, forKey: .socksPort)
         socksPort = Self.normalizedSocksPort(decodedSocksPort ?? Self.defaultSocksPort)
         socksUser = try container.decodeIfPresent(String.self, forKey: .socksUser) ?? ""
@@ -247,6 +252,7 @@ public struct SubscriptionMetadata: Codable, Equatable, Identifiable {
     public var updatedAtUnix: TimeInterval?
     public var lastFetchedAtUnix: TimeInterval?
     public var refreshInterval: String?
+    public var accessExpiresAtUtc: String?
     public var color: String?
     public var icon: String?
     public var used: String?
@@ -266,6 +272,7 @@ public struct SubscriptionMetadata: Codable, Equatable, Identifiable {
         updatedAtUnix: TimeInterval? = nil,
         lastFetchedAtUnix: TimeInterval? = nil,
         refreshInterval: String? = nil,
+        accessExpiresAtUtc: String? = nil,
         color: String? = nil,
         icon: String? = nil,
         used: String? = nil,
@@ -284,6 +291,7 @@ public struct SubscriptionMetadata: Codable, Equatable, Identifiable {
         self.updatedAtUnix = updatedAtUnix
         self.lastFetchedAtUnix = lastFetchedAtUnix
         self.refreshInterval = refreshInterval
+        self.accessExpiresAtUtc = accessExpiresAtUtc
         self.color = color
         self.icon = icon
         self.used = used

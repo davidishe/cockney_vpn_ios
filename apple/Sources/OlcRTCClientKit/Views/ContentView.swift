@@ -58,7 +58,7 @@ public struct ContentView: View {
                     )
                 }
             }
-            .navigationTitle("Godwit")
+            .navigationTitle("Cockney")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
