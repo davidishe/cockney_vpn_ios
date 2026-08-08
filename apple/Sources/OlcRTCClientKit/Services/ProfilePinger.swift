@@ -102,6 +102,7 @@ public struct ProfilePinger: ProfilePinging {
             var error: NSError?
             var result: Int64 = -1
             MobileSetAccessToken(options.accessToken)
+            MobileSetWBToken(options.carrierAuthToken)
             let didPing = MobilePing(
                 options.carrierName,
                 options.transportName,

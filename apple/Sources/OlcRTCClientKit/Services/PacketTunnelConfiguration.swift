@@ -22,6 +22,7 @@ public struct PacketTunnelConfiguration: Equatable {
         static let clientID = "clientID"
         static let keyHex = "keyHex"
         static let accessToken = "accessToken"
+        static let carrierAuthToken = "carrierAuthToken"
         static let socksPort = "socksPort"
         static let socksUser = "socksUser"
         static let socksPass = "socksPass"
@@ -52,6 +53,7 @@ public struct PacketTunnelConfiguration: Equatable {
     public var clientID: String
     public var keyHex: String
     public var accessToken: String
+    public var carrierAuthToken: String
     public var socksPort: Int
     public var socksUser: String
     public var socksPass: String
@@ -82,6 +84,7 @@ public struct PacketTunnelConfiguration: Equatable {
         clientID = profile.clientID
         keyHex = profile.keyHex
         accessToken = profile.accessToken
+        carrierAuthToken = profile.carrierAuthToken
         socksPort = profile.socksPort
         socksUser = profile.socksUser
         socksPass = profile.socksPass
@@ -118,6 +121,7 @@ public struct PacketTunnelConfiguration: Equatable {
         clientID = Self.optionalStringValue(Key.clientID, from: values)
         keyHex = try Self.stringValue(Key.keyHex, from: values)
         accessToken = Self.optionalStringValue(Key.accessToken, from: values)
+        carrierAuthToken = Self.optionalStringValue(Key.carrierAuthToken, from: values)
         socksPort = try Self.intValue(Key.socksPort, from: values)
         socksUser = Self.optionalStringValue(Key.socksUser, from: values)
         socksPass = Self.optionalStringValue(Key.socksPass, from: values)
@@ -155,6 +159,7 @@ public struct PacketTunnelConfiguration: Equatable {
             Key.clientID: clientID as NSString,
             Key.keyHex: keyHex as NSString,
             Key.accessToken: accessToken as NSString,
+            Key.carrierAuthToken: carrierAuthToken as NSString,
             Key.socksPort: socksPort as NSNumber,
             Key.socksUser: socksUser as NSString,
             Key.socksPass: socksPass as NSString,
@@ -218,6 +223,7 @@ public struct PacketTunnelConfiguration: Equatable {
             clientID: clientID,
             keyHex: keyHex,
             accessToken: accessToken,
+            carrierAuthToken: carrierAuthToken,
             socksPort: socksPort,
             socksUser: socksUser,
             socksPass: socksPass,

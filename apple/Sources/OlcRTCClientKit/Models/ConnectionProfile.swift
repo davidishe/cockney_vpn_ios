@@ -64,6 +64,8 @@ public struct ConnectionProfile: Codable, Equatable, Identifiable {
     public var keyHex: String
     /// Cockney multi-user JWT for CLIENT_HELLO. Stored in Keychain, not UserDefaults.
     public var accessToken: String
+    /// Carrier auth.token (vkcalls session_key / anonymToken, wbstream moderator). Keychain only.
+    public var carrierAuthToken: String
     public var socksPort: Int
     public var socksUser: String
     public var socksPass: String
@@ -97,6 +99,7 @@ public struct ConnectionProfile: Codable, Equatable, Identifiable {
         clientID: String = "",
         keyHex: String = "",
         accessToken: String = "",
+        carrierAuthToken: String = "",
         socksPort: Int = Self.defaultSocksPort,
         socksUser: String = "",
         socksPass: String = "",
@@ -129,6 +132,7 @@ public struct ConnectionProfile: Codable, Equatable, Identifiable {
         self.clientID = clientID
         self.keyHex = keyHex
         self.accessToken = accessToken
+        self.carrierAuthToken = carrierAuthToken
         self.socksPort = Self.normalizedSocksPort(socksPort)
         self.socksUser = socksUser
         self.socksPass = socksPass
@@ -197,6 +201,7 @@ public struct ConnectionProfile: Codable, Equatable, Identifiable {
         clientID = try container.decodeIfPresent(String.self, forKey: .clientID) ?? ""
         keyHex = try container.decodeIfPresent(String.self, forKey: .keyHex) ?? ""
         accessToken = ""
+        carrierAuthToken = ""
         let decodedSocksPort = try container.decodeIfPresent(Int.self, forKey: .socksPort)
         socksPort = Self.normalizedSocksPort(decodedSocksPort ?? Self.defaultSocksPort)
         socksUser = try container.decodeIfPresent(String.self, forKey: .socksUser) ?? ""

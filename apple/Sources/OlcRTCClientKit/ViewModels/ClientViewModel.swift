@@ -444,7 +444,7 @@ public final class ClientViewModel: ObservableObject {
                     }
                     let expires = profileToStart.subscription?.accessExpiresAtUtc ?? "unknown"
                     appendLog(
-                        "checkpoint: profile applied device=\(profileToStart.clientID) expires=\(expires) jwt=\(profileToStart.accessToken.isEmpty ? "missing" : "present")"
+                        "checkpoint: profile applied device=\(profileToStart.clientID) expires=\(expires) jwt=\(profileToStart.accessToken.isEmpty ? "missing" : "present") carrierAuth=\(profileToStart.carrierAuthToken.isEmpty ? "missing" : "present")"
                     )
                     if let validationMessage = validate(profile: profileToStart) {
                         status = .failed(validationMessage)
@@ -463,7 +463,7 @@ public final class ClientViewModel: ObservableObject {
                 let options = OlcRTCStartOptions(profile: profileToStart)
                 runningMode = .localProxy
                 appendLog(
-                    "checkpoint: MobileStart carrier=\(options.carrierName) transport=\(options.transportName) room=\(options.roomID) socks=\(options.socksPort) jwt=\(options.accessToken.isEmpty ? "missing" : "present")"
+                    "checkpoint: MobileStart carrier=\(options.carrierName) transport=\(options.transportName) room=\(options.roomID) socks=\(options.socksPort) jwt=\(options.accessToken.isEmpty ? "missing" : "present") carrierAuth=\(options.carrierAuthToken.isEmpty ? "missing" : "present")"
                 )
                 let activePort = try await startEngineUntilReady(options: options)
                 status = .ready
@@ -684,7 +684,7 @@ public final class ClientViewModel: ObservableObject {
         if let first = importedProfiles.first {
             let expires = first.subscription?.accessExpiresAtUtc ?? "n/a"
             appendLog(
-                "checkpoint: sub fetch ok device=\(first.clientID) expires=\(expires) jwt=\(first.accessToken.isEmpty ? "missing" : "present") socks=\(first.socksPort)"
+                "checkpoint: sub fetch ok device=\(first.clientID) expires=\(expires) jwt=\(first.accessToken.isEmpty ? "missing" : "present") carrierAuth=\(first.carrierAuthToken.isEmpty ? "missing" : "present") socks=\(first.socksPort) room=\(first.roomID)"
             )
         }
     }
@@ -1251,6 +1251,10 @@ public final class ClientViewModel: ObservableObject {
         if sourceURL.contains("/api/olcrtc/subscriptions/"),
            profile.accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "Cockney access token is missing. Re-import the subscription URL."
+        }
+        if profile.carrier == .vkcalls,
+           profile.carrierAuthToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "VK Calls carrier auth token is missing. Refresh the Cockney subscription (needs backend with carrierAuthToken)."
         }
         if profile.roomID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return profile.carrier == .jitsi

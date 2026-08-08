@@ -7,6 +7,7 @@ public struct OlcRTCStartOptions: Equatable {
     public var clientID: String
     public var keyHex: String
     public var accessToken: String
+    public var carrierAuthToken: String
     public var socksPort: Int
     public var socksUser: String
     public var socksPass: String
@@ -37,6 +38,7 @@ public struct OlcRTCStartOptions: Equatable {
         clientID = Self.normalizedClientID(profile)
         keyHex = profile.keyHex
         accessToken = profile.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        carrierAuthToken = profile.carrierAuthToken.trimmingCharacters(in: .whitespacesAndNewlines)
         socksPort = profile.socksPort
         socksUser = profile.socksUser
         socksPass = profile.socksPass

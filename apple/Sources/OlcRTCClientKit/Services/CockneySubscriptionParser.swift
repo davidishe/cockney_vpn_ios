@@ -101,6 +101,9 @@ public struct CockneySubscriptionParser {
         if let batch = profileDTO.vp8BatchSize, batch > 0 {
             profile.vp8BatchSize = batch
         }
+        if let carrierAuthToken = normalized(profileDTO.carrierAuthToken) {
+            profile.carrierAuthToken = carrierAuthToken
+        }
 
         profile.id = UUID()
         profile.name = deviceName
@@ -199,4 +202,5 @@ private struct ProfileDTO: Decodable {
     let vp8Fps: Int?
     let vp8BatchSize: Int?
     let connectionUri: String?
+    let carrierAuthToken: String?
 }

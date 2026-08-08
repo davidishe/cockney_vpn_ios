@@ -21,6 +21,7 @@ final class CockneySubscriptionParserTests: XCTestCase {
             "cryptoKey": "\(key)",
             "vp8Fps": 30,
             "vp8BatchSize": 8,
+            "carrierAuthToken": "-w-test-session-key",
             "connectionUri": "olcrtc://wbstream?vp8channel@019fdcf8-2b0a-70c7-88ae-86af25d110cd#\(key)$Cockney"
           }
         }
@@ -31,6 +32,7 @@ final class CockneySubscriptionParserTests: XCTestCase {
         let profile = try XCTUnwrap(imported.profiles.first)
         XCTAssertEqual(profile.clientID, "5d14ba93-14b9-4d88-ba0b-79de28ba49a8")
         XCTAssertEqual(profile.accessToken, "eyJhbGciOiJFUzI1NiJ9.payload.signature")
+        XCTAssertEqual(profile.carrierAuthToken, "-w-test-session-key")
         XCTAssertEqual(profile.carrier, .wbstream)
         XCTAssertEqual(profile.transport, .vp8channel)
         XCTAssertEqual(profile.roomID, "019fdcf8-2b0a-70c7-88ae-86af25d110cd")

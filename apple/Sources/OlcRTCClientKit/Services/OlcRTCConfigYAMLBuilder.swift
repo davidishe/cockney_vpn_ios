@@ -12,6 +12,7 @@ struct OlcRTCConfigYAMLBuilder {
         lines.append("link: direct")
         lines.append("auth:")
         lines.append("  provider: \(yamlString(options.carrierName))")
+        appendIfPresent("  token", options.carrierAuthToken, to: &lines)
         lines.append("room:")
         lines.append("  id: \(yamlString(options.roomID))")
         lines.append("crypto:")

@@ -88,6 +88,7 @@ public final class GomobileOlcRTCEngine: OlcRTCEngine {
             MobileSetDNS(options.dnsServer)
             MobileSetVP8Options(options.vp8FPS, options.vp8BatchSize)
             MobileSetAccessToken(options.accessToken)
+            MobileSetWBToken(options.carrierAuthToken)
             var error: NSError?
             let didStart = MobileStart(
                 options.carrierName,

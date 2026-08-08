@@ -37,6 +37,7 @@ public final class ProfileStore {
             profile.keyHex = ""
             profile.socksPass = ""
             profile.accessToken = ""
+            profile.carrierAuthToken = ""
             return profile
         }
 

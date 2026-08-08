@@ -7,6 +7,7 @@ public final class ProfileSecretStore {
     private let keyHexField = "keyHex"
     private let socksPassField = "socksPass"
     private let accessTokenField = "accessToken"
+    private let carrierAuthTokenField = "carrierAuthToken"
 
     public init() {}
 
@@ -84,6 +85,7 @@ public final class ProfileSecretStore {
         delete(profileID: profileID, field: keyHexField)
         delete(profileID: profileID, field: socksPassField)
         delete(profileID: profileID, field: accessTokenField)
+        delete(profileID: profileID, field: carrierAuthTokenField)
     }
 
     private func read(profileID: UUID, field: String) -> String? {
@@ -174,6 +176,9 @@ public final class ProfileSecretStore {
             if let accessToken = read(profileID: profileID, field: accessTokenField) {
                 secrets[profileID, default: [:]][accessTokenField] = accessToken
             }
+            if let carrierAuthToken = read(profileID: profileID, field: carrierAuthTokenField) {
+                secrets[profileID, default: [:]][carrierAuthTokenField] = carrierAuthToken
+            }
         }
         return secrets
     }
@@ -185,6 +190,7 @@ public final class ProfileSecretStore {
         profile.keyHex = secrets[keyHexField] ?? profile.keyHex
         profile.socksPass = secrets[socksPassField] ?? profile.socksPass
         profile.accessToken = secrets[accessTokenField] ?? profile.accessToken
+        profile.carrierAuthToken = secrets[carrierAuthTokenField] ?? profile.carrierAuthToken
     }
 
     private func secretFields(from profile: ConnectionProfile) -> [String: String] {
@@ -197,6 +203,9 @@ public final class ProfileSecretStore {
         }
         if !profile.accessToken.isEmpty {
             fields[accessTokenField] = profile.accessToken
+        }
+        if !profile.carrierAuthToken.isEmpty {
+            fields[carrierAuthTokenField] = profile.carrierAuthToken
         }
         return fields
     }
@@ -278,7 +287,7 @@ public final class ProfileSecretStore {
 
         let idValue = String(account[..<separatorIndex])
         let field = String(account[account.index(after: separatorIndex)...])
-        guard [keyHexField, socksPassField, accessTokenField].contains(field),
+        guard [keyHexField, socksPassField, accessTokenField, carrierAuthTokenField].contains(field),
               let profileID = UUID(uuidString: idValue) else {
             return nil
         }
