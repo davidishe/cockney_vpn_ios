@@ -46,6 +46,18 @@ final class OlcRTCURIParserTests: XCTestCase {
         XCTAssertEqual(profile.name, "RU / olc free sub / IPv6")
     }
 
+    func testParsesVkCallsURI() throws {
+        let profile = try parser.parse(
+            "olcrtc://vkcalls?vp8channel@join-abc#d823fa01cb3e0609b67322f7cf984c4ee2e4ce2e294936fc24ef38c9e59f4799$Cockney",
+            into: .empty
+        )
+
+        XCTAssertEqual(profile.carrier, .vkcalls)
+        XCTAssertEqual(profile.transport, .vp8channel)
+        XCTAssertEqual(profile.roomID, "join-abc")
+        XCTAssertEqual(profile.name, "Cockney")
+    }
+
     func testKeepsLegacyClientIDCompatibility() throws {
         let profile = try parser.parse(
             "olcrtc://jitsi?datachannel@https://meet.cryptopro.ru/myroom#d823fa01cb3e0609b67322f7cf984c4ee2e4ce2e294936fc24ef38c9e59f4799%legacy-client$Legacy",

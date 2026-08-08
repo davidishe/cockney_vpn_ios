@@ -4,6 +4,7 @@ public enum Carrier: String, CaseIterable, Codable, Identifiable {
     case jitsi
     case telemost
     case wbstream
+    case vkcalls
 
     public var id: String { rawValue }
 
@@ -12,6 +13,7 @@ public enum Carrier: String, CaseIterable, Codable, Identifiable {
         case .jitsi: "Jitsi"
         case .telemost: "Telemost"
         case .wbstream: "WBStream"
+        case .vkcalls: "VK Calls"
         }
     }
 
@@ -19,6 +21,7 @@ public enum Carrier: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .telemost: [.vp8channel, .videochannel]
         case .wbstream: [.datachannel, .vp8channel, .seichannel, .videochannel]
+        case .vkcalls: [.vp8channel]
         case .jitsi:    [.datachannel, .vp8channel, .seichannel, .videochannel]
         }
     }
