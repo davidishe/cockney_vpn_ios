@@ -8,6 +8,9 @@ import Tun2SocksKitC
 final class PacketTunnelProvider: NEPacketTunnelProvider {
     private enum Constants {
         static let tunnelAddress = "198.18.0.1"
+        // Must differ from tunnelAddress: iOS installs a host route for the remote
+        // address, and pointing it at the interface's own address breaks routing.
+        static let tunnelRemoteAddress = "254.1.1.1"
         static let tunnelSubnetMask = "255.255.255.0"
         static let mapDNSAddress = "198.18.0.2"
         static let mapDNSNetwork = "198.18.0.0"
@@ -141,7 +144,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     private func applyNetworkSettings(configuration: PacketTunnelConfiguration) async throws {
-        let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: Constants.tunnelAddress)
+        let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: Constants.tunnelRemoteAddress)
         settings.mtu = Constants.mtu as NSNumber
 
         let ipv4Settings = NEIPv4Settings(
@@ -321,8 +324,43 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         )
     }
 
+    /// The descriptor we hand to tun2socks is only useful if the system actually
+    /// configured that same interface with the tunnel address.
+    private func logTunnelInterfaces() {
+        var head: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&head) == 0, let first = head else {
+            log("checkpoint: getifaddrs failed", level: .checkpoint)
+            return
+        }
+        defer { freeifaddrs(head) }
+
+        var entries: [String] = []
+        for ptr in sequence(first: first, next: { $0.pointee.ifa_next }) {
+            let name = String(cString: ptr.pointee.ifa_name)
+            guard name.hasPrefix("utun"), let sa = ptr.pointee.ifa_addr else { continue }
+            guard sa.pointee.sa_family == UInt8(AF_INET) || sa.pointee.sa_family == UInt8(AF_INET6) else { continue }
+
+            var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            guard getnameinfo(
+                sa,
+                socklen_t(sa.pointee.sa_len),
+                &host,
+                socklen_t(NI_MAXHOST),
+                nil,
+                0,
+                NI_NUMERICHOST
+            ) == 0 else { continue }
+
+            let up = (ptr.pointee.ifa_flags & UInt32(IFF_UP)) != 0
+            entries.append("\(name)=\(String(cString: host))\(up ? "" : "(down)")")
+        }
+
+        log("checkpoint: utun interfaces [\(entries.joined(separator: " "))]", level: .checkpoint)
+    }
+
     private func startTun2Socks(configuration: PacketTunnelConfiguration) async {
         logUtunDescriptors()
+        logTunnelInterfaces()
         let socksPort = await engine?.activeSocksPort ?? configuration.socksPort
         let logURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("olcrtc-tun2socks.log")
@@ -408,8 +446,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         guard let logURL = tun2socksLogURL else { return }
         tun2socksLogTask?.cancel()
         tun2socksLogTask = Task { [weak self] in
+            // Debug level is per-packet chatty; enough lines to diagnose, not to flood.
+            let maxLines = 300
+            var forwarded = 0
             var offset: UInt64 = 0
-            while !Task.isCancelled {
+            var reportedSilence = false
+
+            while !Task.isCancelled, forwarded < maxLines {
                 if let handle = try? FileHandle(forReadingFrom: logURL) {
                     try? handle.seek(toOffset: offset)
                     let data = (try? handle.readToEnd()) ?? Data()
@@ -417,9 +460,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                     try? handle.close()
                     if let text = String(data: data, encoding: .utf8) {
                         for line in text.split(separator: "\n") where !line.isEmpty {
+                            guard forwarded < maxLines else { break }
+                            forwarded += 1
                             self?.log("tun2socks: \(line)", level: .info)
                         }
                     }
+                }
+                if offset == 0, !reportedSilence {
+                    reportedSilence = true
+                    self?.log("checkpoint: tun2socks log still empty", level: .checkpoint)
                 }
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
@@ -482,7 +531,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
           tcp-read-write-timeout: 300000
           udp-read-write-timeout: 60000
           log-file: \(logPath)
-          log-level: \(debugLogging ? "debug" : "info")
+          log-level: debug
           limit-nofile: 65535
         """
     }
