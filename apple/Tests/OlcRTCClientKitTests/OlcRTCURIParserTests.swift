@@ -58,6 +58,19 @@ final class OlcRTCURIParserTests: XCTestCase {
         XCTAssertEqual(profile.name, "Cockney")
     }
 
+    func testParsesVkCallsTurnrelayURI() throws {
+        let profile = try parser.parse(
+            "olcrtc://vkcalls?turnrelay<turn-endpoint=195.133.81.165:56000>@join-abc#d823fa01cb3e0609b67322f7cf984c4ee2e4ce2e294936fc24ef38c9e59f4799$Cockney",
+            into: .empty
+        )
+
+        XCTAssertEqual(profile.carrier, .vkcalls)
+        XCTAssertEqual(profile.transport, .turnrelay)
+        XCTAssertEqual(profile.roomID, "join-abc")
+        XCTAssertEqual(profile.turnEndpoint, "195.133.81.165:56000")
+        XCTAssertEqual(profile.name, "Cockney")
+    }
+
     func testKeepsLegacyClientIDCompatibility() throws {
         let profile = try parser.parse(
             "olcrtc://jitsi?datachannel@https://meet.cryptopro.ru/myroom#d823fa01cb3e0609b67322f7cf984c4ee2e4ce2e294936fc24ef38c9e59f4799%legacy-client$Legacy",

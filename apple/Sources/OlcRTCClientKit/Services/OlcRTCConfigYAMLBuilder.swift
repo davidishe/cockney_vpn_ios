@@ -61,6 +61,12 @@ struct OlcRTCConfigYAMLBuilder {
             lines.append("  qr_recovery: \(yamlString(options.videoQRRecovery))")
             lines.append("  tile_module: \(options.videoTileModule)")
             lines.append("  tile_rs: \(options.videoTileRS)")
+        case "turnrelay":
+            let endpoint = options.turnEndpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !endpoint.isEmpty {
+                lines.append("turnrelay:")
+                lines.append("  endpoint: \(yamlString(endpoint))")
+            }
         default:
             break
         }

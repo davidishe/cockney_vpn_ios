@@ -21,7 +21,7 @@ public enum Carrier: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .telemost: [.vp8channel, .videochannel]
         case .wbstream: [.datachannel, .vp8channel, .seichannel, .videochannel]
-        case .vkcalls: [.vp8channel]
+        case .vkcalls: [.vp8channel, .turnrelay]
         case .jitsi:    [.datachannel, .vp8channel, .seichannel, .videochannel]
         }
     }
@@ -32,6 +32,7 @@ public enum Transport: String, CaseIterable, Codable, Identifiable {
     case datachannel
     case seichannel
     case videochannel
+    case turnrelay
 
     public var id: String { rawValue }
 
@@ -41,6 +42,7 @@ public enum Transport: String, CaseIterable, Codable, Identifiable {
         case .datachannel: "datachannel"
         case .seichannel: "seichannel"
         case .videochannel: "videochannel"
+        case .turnrelay: "turnrelay"
         }
     }
 }
@@ -88,6 +90,8 @@ public struct ConnectionProfile: Codable, Equatable, Identifiable {
     public var videoTileModule: Int
     public var videoTileRS: Int
     public var startTimeoutMillis: Int
+    /// NL agent public UDP host:port for turnrelay (e.g. 195.133.81.165:56000).
+    public var turnEndpoint: String
 
     public init(
         id: UUID = UUID(),
@@ -121,7 +125,8 @@ public struct ConnectionProfile: Codable, Equatable, Identifiable {
         videoQRSize: Int = 0,
         videoTileModule: Int = 4,
         videoTileRS: Int = 20,
-        startTimeoutMillis: Int = Self.defaultStartTimeoutMillis
+        startTimeoutMillis: Int = Self.defaultStartTimeoutMillis,
+        turnEndpoint: String = ""
     ) {
         self.id = id
         self.subscription = subscription
@@ -155,6 +160,7 @@ public struct ConnectionProfile: Codable, Equatable, Identifiable {
         self.videoTileModule = videoTileModule
         self.videoTileRS = videoTileRS
         self.startTimeoutMillis = startTimeoutMillis
+        self.turnEndpoint = turnEndpoint
     }
 
     enum CodingKeys: String, CodingKey {
@@ -188,6 +194,7 @@ public struct ConnectionProfile: Codable, Equatable, Identifiable {
         case videoTileModule
         case videoTileRS
         case startTimeoutMillis
+        case turnEndpoint
     }
 
     public init(from decoder: Decoder) throws {
@@ -207,6 +214,7 @@ public struct ConnectionProfile: Codable, Equatable, Identifiable {
         socksUser = try container.decodeIfPresent(String.self, forKey: .socksUser) ?? ""
         socksPass = try container.decodeIfPresent(String.self, forKey: .socksPass) ?? ""
         dnsServer = try container.decodeIfPresent(String.self, forKey: .dnsServer) ?? "77.88.8.8:53"
+        turnEndpoint = try container.decodeIfPresent(String.self, forKey: .turnEndpoint) ?? ""
         debugLogging = try container.decodeIfPresent(Bool.self, forKey: .debugLogging) ?? false
         vp8FPS = try container.decodeIfPresent(Int.self, forKey: .vp8FPS) ?? 60
         vp8BatchSize = try container.decodeIfPresent(Int.self, forKey: .vp8BatchSize) ?? 64

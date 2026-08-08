@@ -30,6 +30,7 @@ public struct OlcRTCStartOptions: Equatable {
     public var videoTileModule: Int
     public var videoTileRS: Int
     public var startTimeoutMillis: Int
+    public var turnEndpoint: String
 
     public init(profile: ConnectionProfile) {
         carrierName = profile.carrier.rawValue
@@ -61,6 +62,7 @@ public struct OlcRTCStartOptions: Equatable {
         videoTileModule = profile.videoTileModule
         videoTileRS = profile.videoTileRS
         startTimeoutMillis = profile.startTimeoutMillis
+        turnEndpoint = profile.turnEndpoint.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func normalizedClientID(_ profile: ConnectionProfile) -> String {

@@ -181,6 +181,13 @@ public struct ProfileEditorView: View {
 
                     case .datachannel:
                         EmptyView()
+
+                    case .turnrelay:
+                        ConnectionTextRow(
+                            title: "TURN endpoint",
+                            text: $profile.turnEndpoint,
+                            onCommit: onCommit
+                        )
                     }
                 }
             }

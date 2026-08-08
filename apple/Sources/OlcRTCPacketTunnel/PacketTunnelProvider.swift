@@ -148,19 +148,25 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 log("checkpoint: exclude control-plane route \(host) → \(ip)", level: .checkpoint)
             }
         }
-        // Keep VK Calls / olcRTC media off-tunnel. If these go into TUN, ICE/WebRTC
-        // self-eats (sendto: can't assign requested address) and sites never get SOCKS streams.
-        for route in carrierMediaBypassRoutes() {
-            excluded.append(route)
-            log(
-                "checkpoint: exclude carrier-media route \(route.destinationAddress)/\(route.destinationSubnetMask ?? "?")",
-                level: .checkpoint
-            )
-        }
-        for host in carrierMediaHosts() {
-            for ip in await resolveIPv4Addresses(host: host) {
-                excluded.append(NEIPv4Route(destinationAddress: ip, subnetMask: "255.255.255.255"))
-                log("checkpoint: exclude carrier-media host \(host) → \(ip)", level: .checkpoint)
+        let transportName = configuration.connectionProfile.transport.rawValue
+        if transportName == Transport.turnrelay.rawValue {
+            // turnrelay binds TURN/UDP via IP_BOUND_IF (MobileSetProtector); no media bypass.
+            log("checkpoint: turnrelay routing — default route + control-plane exclude only", level: .checkpoint)
+        } else {
+            // Keep VK Calls / olcRTC media off-tunnel for vp8channel. If these go into TUN,
+            // ICE/WebRTC self-eats (sendto: can't assign requested address).
+            for route in carrierMediaBypassRoutes() {
+                excluded.append(route)
+                log(
+                    "checkpoint: exclude carrier-media route \(route.destinationAddress)/\(route.destinationSubnetMask ?? "?")",
+                    level: .checkpoint
+                )
+            }
+            for host in carrierMediaHosts() {
+                for ip in await resolveIPv4Addresses(host: host) {
+                    excluded.append(NEIPv4Route(destinationAddress: ip, subnetMask: "255.255.255.255"))
+                    log("checkpoint: exclude carrier-media host \(host) → \(ip)", level: .checkpoint)
+                }
             }
         }
         ipv4Settings.excludedRoutes = excluded

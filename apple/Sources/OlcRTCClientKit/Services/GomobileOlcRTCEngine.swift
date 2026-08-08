@@ -10,6 +10,7 @@ public final class GomobileOlcRTCEngine: OlcRTCEngine {
     private var currentSocksPort: Int?
     #if canImport(Mobile)
     private var logRelay: MobileLogRelay?
+    private var socketProtector: IOSSocketProtector?
     #endif
 
     public init() {}
@@ -18,6 +19,7 @@ public final class GomobileOlcRTCEngine: OlcRTCEngine {
         #if canImport(Mobile)
         MobileStop()
         MobileSetLogWriter(nil)
+        MobileSetProtector(nil)
         #endif
     }
 
@@ -76,12 +78,22 @@ public final class GomobileOlcRTCEngine: OlcRTCEngine {
         let relay = MobileLogRelay { [weak self] message in
             self?.emit(message)
         }
+        let protector = IOSSocketProtector()
         withLock {
             logRelay = relay
+            socketProtector = protector
+        }
+        if let protector {
+            emit(
+                "checkpoint: socket-protector bind if=\(protector.boundInterfaceName) idx=\(protector.boundInterfaceIndex)"
+            )
+        } else {
+            emit("checkpoint: socket-protector unavailable (no physical iface)")
         }
 
         try await Task.detached {
             MobileSetLogWriter(relay)
+            MobileSetProtector(protector)
             MobileSetProviders()
             MobileSetDebug(options.debugLogging)
             MobileSetTransport(options.transportName)
@@ -89,6 +101,9 @@ public final class GomobileOlcRTCEngine: OlcRTCEngine {
             MobileSetVP8Options(options.vp8FPS, options.vp8BatchSize)
             MobileSetAccessToken(options.accessToken)
             MobileSetWBToken(options.carrierAuthToken)
+            if !options.turnEndpoint.isEmpty {
+                MobileSetEndpoint(options.turnEndpoint)
+            }
             var error: NSError?
             let didStart = MobileStart(
                 options.carrierName,
@@ -130,12 +145,15 @@ public final class GomobileOlcRTCEngine: OlcRTCEngine {
         await Task.detached {
             MobileStop()
             MobileSetLogWriter(nil)
+            MobileSetProtector(nil)
+            MobileSetEndpoint("")
         }.value
         #endif
         withLock {
             currentSocksPort = nil
             #if canImport(Mobile)
             logRelay = nil
+            socketProtector = nil
             #endif
         }
 

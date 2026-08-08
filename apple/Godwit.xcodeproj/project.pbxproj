@@ -44,15 +44,15 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		2F4D406075B3186EB7125F4E /* OlcRTCPacketTunnel.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = OlcRTCPacketTunnel.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		2F4D406075B3186EB7125F4E /* OlcRTCPacketTunnel.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = OlcRTCPacketTunnel.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		2FF4A5572B529CBDC8859A85 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		3578882557AFC537CF835417 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		3A5930A5C2CEE0C5A7A53308 /* Cockney.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cockney.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		3A5930A5C2CEE0C5A7A53308 /* OlcRTCClient iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "OlcRTCClient iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		3D6B931F90D6712C6F7F6AF8 /* OlcRTCClientiOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OlcRTCClientiOS.entitlements; sourceTree = "<group>"; };
 		47ED25B2BD9797D2631E00B5 /* OlcRTCClientMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OlcRTCClientMacApp.swift; sourceTree = "<group>"; };
 		AC6C10DAAB15281DD213DE1C /* OlcRTCPacketTunnel.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OlcRTCPacketTunnel.entitlements; sourceTree = "<group>"; };
 		BF45A92C833F7B5CD177992A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		C0CC302F4508D6BF0C0B15C9 /* OlcRTCClient macOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = "OlcRTCClient macOS.app"; path = Cockney.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C0CC302F4508D6BF0C0B15C9 /* OlcRTCClient macOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "OlcRTCClient macOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		CAD6ECD13ADEFB676FA1BB3F /* PacketTunnelProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketTunnelProvider.swift; sourceTree = "<group>"; };
 		EF8EF6C2B3C5313E4A93E2CA /* OlcRTCClientiOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OlcRTCClientiOSApp.swift; sourceTree = "<group>"; };
 		F44AABC54AB0D178E9D385B6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -121,7 +121,7 @@
 		783F456CF3273F9555A02C66 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				3A5930A5C2CEE0C5A7A53308 /* Cockney.app */,
+				3A5930A5C2CEE0C5A7A53308 /* OlcRTCClient iOS.app */,
 				C0CC302F4508D6BF0C0B15C9 /* OlcRTCClient macOS.app */,
 				2F4D406075B3186EB7125F4E /* OlcRTCPacketTunnel.appex */,
 			);
@@ -212,7 +212,7 @@
 				A861C54970BF434BC46E36E9 /* OlcRTCClientKit */,
 			);
 			productName = "OlcRTCClient iOS";
-			productReference = 3A5930A5C2CEE0C5A7A53308 /* Cockney.app */;
+			productReference = 3A5930A5C2CEE0C5A7A53308 /* OlcRTCClient iOS.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -225,13 +225,15 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					862BFEBD42D77F6FDAFF2E95 = {
+						DevelopmentTeam = "${DEVELOPMENT_TEAM}";
 						ProvisioningStyle = Automatic;
 					};
 					C2E413E007C5452A1F648CC2 = {
-						DevelopmentTeam = "";
+						DevelopmentTeam = "${DEVELOPMENT_TEAM}";
 						ProvisioningStyle = Automatic;
 					};
 					D21B4EC9BE3DA01BF59FC886 = {
+						DevelopmentTeam = "${DEVELOPMENT_TEAM}";
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -353,7 +355,7 @@
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = "${DEVELOPMENT_TEAM}";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -387,7 +389,6 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Sources/OlcRTCClientiOS/OlcRTCClientiOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = 37G89JTMS6;
 				INFOPLIST_FILE = Sources/OlcRTCClientiOS/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -445,7 +446,6 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Sources/OlcRTCClientiOS/OlcRTCClientiOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = 37G89JTMS6;
 				INFOPLIST_FILE = Sources/OlcRTCClientiOS/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -496,7 +496,7 @@
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = "${DEVELOPMENT_TEAM}";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -522,14 +522,9 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = Sources/OlcRTCPacketTunnel/OlcRTCPacketTunnel.entitlements;
-				DEVELOPMENT_TEAM = 37G89JTMS6;
 				INFOPLIST_FILE = Sources/OlcRTCPacketTunnel/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
 				PRODUCT_BUNDLE_IDENTIFIER = space.tokenova.cockney.ios.PacketTunnel;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -541,14 +536,9 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = Sources/OlcRTCPacketTunnel/OlcRTCPacketTunnel.entitlements;
-				DEVELOPMENT_TEAM = 37G89JTMS6;
 				INFOPLIST_FILE = Sources/OlcRTCPacketTunnel/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@executable_path/../../Frameworks",
-				);
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
 				PRODUCT_BUNDLE_IDENTIFIER = space.tokenova.cockney.ios.PacketTunnel;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";

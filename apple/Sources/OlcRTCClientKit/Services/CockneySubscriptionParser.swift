@@ -104,6 +104,9 @@ public struct CockneySubscriptionParser {
         if let carrierAuthToken = normalized(profileDTO.carrierAuthToken) {
             profile.carrierAuthToken = carrierAuthToken
         }
+        if let turnEndpoint = normalized(profileDTO.turnEndpoint) {
+            profile.turnEndpoint = turnEndpoint
+        }
 
         profile.id = UUID()
         profile.name = deviceName
@@ -165,6 +168,9 @@ public struct CockneySubscriptionParser {
         parsed.transport = transport
         parsed.roomID = roomID
         parsed.keyHex = cryptoKey
+        if let turnEndpoint = normalized(dto.turnEndpoint) {
+            parsed.turnEndpoint = turnEndpoint
+        }
         return parsed
     }
 
@@ -203,4 +209,5 @@ private struct ProfileDTO: Decodable {
     let vp8BatchSize: Int?
     let connectionUri: String?
     let carrierAuthToken: String?
+    let turnEndpoint: String?
 }

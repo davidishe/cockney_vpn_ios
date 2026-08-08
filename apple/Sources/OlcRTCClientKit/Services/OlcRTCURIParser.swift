@@ -133,6 +133,9 @@ public struct OlcRTCURIParser {
         if let value = parameters["vp8-batch"].flatMap(Int.init) {
             profile.vp8BatchSize = value
         }
+        if let value = parameters["turn-endpoint"], !value.isEmpty {
+            profile.turnEndpoint = value
+        }
         if let value = parameters["fps"].flatMap(Int.init) {
             profile.seiFPS = value
         }
