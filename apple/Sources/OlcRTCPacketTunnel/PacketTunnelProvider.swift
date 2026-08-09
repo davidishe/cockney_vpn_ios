@@ -8,14 +8,16 @@ import Tun2SocksKitC
 final class PacketTunnelProvider: NEPacketTunnelProvider {
     private enum Constants {
         static let tunnelAddress = "198.18.0.1"
-        // Must differ from tunnelAddress: iOS installs a host route for the remote
-        // address, and pointing it at the interface's own address breaks routing.
-        static let tunnelRemoteAddress = "254.1.1.1"
+        // Only used when the endpoint host is unavailable. Must differ from
+        // tunnelAddress and stay out of reserved space, or iOS treats the tunnel's
+        // network service as non-viable and every routed connection gets ENETDOWN.
+        static let fallbackRemoteAddress = "10.255.255.254"
         static let tunnelSubnetMask = "255.255.255.0"
         static let mapDNSAddress = "198.18.0.2"
         static let mapDNSNetwork = "198.18.0.0"
         static let mapDNSNetmask = "255.255.0.0"
-        static let mtu = 8500
+        // KCP over TURN over UDP leaves little room under a 1500-byte path.
+        static let mtu = 1360
     }
 
     private final class Tun2SocksLaunchState: @unchecked Sendable {
@@ -146,7 +148,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     private func applyNetworkSettings(configuration: PacketTunnelConfiguration) async throws {
-        let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: Constants.tunnelRemoteAddress)
+        let remoteAddress = remoteEndpointAddress(configuration: configuration)
+        log("checkpoint: tunnel remote address \(remoteAddress)", level: .checkpoint)
+        let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: remoteAddress)
         settings.mtu = Constants.mtu as NSNumber
 
         let ipv4Settings = NEIPv4Settings(
@@ -324,6 +328,20 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             "checkpoint: utun descriptors count=\(found.count) [\(found.joined(separator: " "))]",
             level: .checkpoint
         )
+    }
+
+    /// iOS builds the tunnel's network service around this address, so it has to look
+    /// like a real peer. The turnrelay endpoint is exactly that.
+    private func remoteEndpointAddress(configuration: PacketTunnelConfiguration) -> String {
+        let endpoint = configuration.turnEndpoint.trimmingCharacters(in: .whitespaces)
+        let host = endpoint.contains(":")
+            ? String(endpoint.split(separator: ":").first ?? "")
+            : endpoint
+        var addr = in_addr()
+        guard !host.isEmpty, inet_pton(AF_INET, host, &addr) == 1 else {
+            return Constants.fallbackRemoteAddress
+        }
+        return host
     }
 
     /// The descriptor we hand to tun2socks is only useful if the system actually
