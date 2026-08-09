@@ -85,10 +85,10 @@ public final class GomobileOlcRTCEngine: OlcRTCEngine {
         }
         if let protector {
             emit(
-                "checkpoint: socket-protector bind if=\(protector.boundInterfaceName) idx=\(protector.boundInterfaceIndex)"
+                "checkpoint: socket-protector bind if=\(protector.boundInterfaceName) idx=\(protector.boundInterfaceIndex) \(protector.selectionSummary)"
             )
         } else {
-            emit("checkpoint: socket-protector unavailable (no physical iface)")
+            emit("checkpoint: socket-protector unavailable (no live physical iface)")
         }
 
         try await Task.detached {
