@@ -136,7 +136,10 @@ public final class PacketTunnelManager {
         // (subscription / diagnostics HTTPS) directly. With true, app HTTPS
         // goes through the tunnel and often fails with SSL/timeouts.
         tunnelProtocol.includeAllNetworks = false
-        tunnelProtocol.excludeLocalNetworks = true
+        // The tunnel address and the mapped-DNS pool both live in 198.18/15, which
+        // iOS lumps in with the local networks it diverts to the physical interface.
+        // Excluding them strands every address the resolver hands out.
+        tunnelProtocol.excludeLocalNetworks = false
         tunnelProtocol.enforceRoutes = true
 
         manager.localizedDescription = localizedDescription

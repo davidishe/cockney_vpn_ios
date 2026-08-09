@@ -82,7 +82,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 try await startOlcRTC(configuration: configuration)
                 log("checkpoint: WaitReady ok — applying tunnel settings", level: .checkpoint)
                 try await applyNetworkSettings(configuration: configuration)
-                log("checkpoint: tunnel settings applied addr=\(Constants.tunnelAddress)", level: .checkpoint)
+                log(
+                    "checkpoint: tunnel settings applied addr=\(Constants.tunnelAddress)/\(Constants.tunnelSubnetMask) mtu=\(Constants.mtu)",
+                    level: .checkpoint
+                )
                 // utun fd from NetworkExtension is sometimes not visible for a beat.
                 try await Task.sleep(nanoseconds: 300_000_000)
                 await startTun2Socks(configuration: configuration)
