@@ -12,7 +12,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         // tunnelAddress and stay out of reserved space, or iOS treats the tunnel's
         // network service as non-viable and every routed connection gets ENETDOWN.
         static let fallbackRemoteAddress = "10.255.255.254"
-        static let tunnelSubnetMask = "255.255.255.0"
+        // /32 keeps the tunnel point-to-point. A wider prefix makes the kernel treat
+        // neighbouring addresses as on-link and try to resolve a link-layer next hop,
+        // which a utun cannot do, so sends fail with EHOSTUNREACH.
+        static let tunnelSubnetMask = "255.255.255.255"
         static let mapDNSAddress = "198.18.0.2"
         static let mapDNSNetwork = "198.18.0.0"
         static let mapDNSNetmask = "255.255.0.0"
