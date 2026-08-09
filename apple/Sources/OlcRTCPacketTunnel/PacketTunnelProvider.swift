@@ -559,8 +559,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         // A route carrying REJECT answers sends with EHOSTUNREACH while still
         // resolving during lookup, and BLACKHOLE swallows them outright.
         let namedFlags: [(Int32, String)] = [
-            (0x8, "gateway"), (0x4, "host"), (0x8 << 5, "reject"),
-            (0x1000, "blackhole"), (0x100000, "ifscope"), (0x2000000, "global"),
+            (0x2, "gateway"), (0x4, "host"), (0x8, "reject"), (0x100, "cloning"),
+            (0x800, "static"), (0x1000, "blackhole"), (0x100_0000, "ifscope"),
+            (0x4000_0000, "global"),
         ]
 
         var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_DUMP, 0]
