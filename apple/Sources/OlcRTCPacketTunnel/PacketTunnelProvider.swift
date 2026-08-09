@@ -158,9 +158,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             subnetMasks: [Constants.tunnelSubnetMask]
         )
         ipv4Settings.includedRoutes = [NEIPv4Route.default()]
-        var excluded: [NEIPv4Route] = [
-            NEIPv4Route(destinationAddress: "127.0.0.0", subnetMask: "255.0.0.0"),
-        ]
+        // Loopback is deliberately absent: it never routes through a tunnel, and
+        // excluding it points the SOCKS listener and the resolver at the physical
+        // interface instead.
+        var excluded: [NEIPv4Route] = []
         // Keep Cockney control-plane HTTPS off-tunnel (subscription + log upload).
         let controlHosts = controlPlaneHosts(from: configuration)
         for host in controlHosts {
