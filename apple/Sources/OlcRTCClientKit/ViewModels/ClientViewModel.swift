@@ -1363,6 +1363,16 @@ public final class ClientViewModel: ObservableObject {
         logs = DiagnosticJournal.shared.recentUILines()
     }
 
+    /// Runs from the app, not the extension, so the result reflects what Safari sees.
+    private func runTunnelReachabilityProbe() async {
+        appendLog("checkpoint: probe starting", level: .checkpoint)
+        let result = await TunnelReachabilityProbe.run()
+        for line in result.lines {
+            appendLog("checkpoint: \(line)", level: .checkpoint)
+        }
+        logs = DiagnosticJournal.shared.recentUILines()
+    }
+
     private func beginDiagnosticSession(for profile: ConnectionProfile, mode: String) {
         let sessionId = diagnosticSessionId ?? UUID()
         diagnosticSessionId = sessionId
@@ -1428,6 +1438,7 @@ public final class ClientViewModel: ObservableObject {
                 )
                 DiagnosticJournal.shared.mergeSharedLogIntoUI()
                 logs = DiagnosticJournal.shared.recentUILines()
+                await runTunnelReachabilityProbe()
             } catch {
                 if error is CancellationError {
                     await packetTunnelManager.stop()
