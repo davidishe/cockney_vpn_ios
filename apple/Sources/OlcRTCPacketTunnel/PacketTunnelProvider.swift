@@ -778,7 +778,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
           tcp-read-write-timeout: 300000
           udp-read-write-timeout: 60000
           log-file: \(logPath)
-          log-level: debug
+          log-level: \(debugLogging ? "debug" : "warn")
           limit-nofile: 65535
         """
     }
