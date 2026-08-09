@@ -79,6 +79,7 @@ public final class ClientViewModel: ObservableObject {
     #endif
     private var eventTask: Task<Void, Never>?
     private var startTask: Task<Void, Never>?
+    private var logUploadTask: Task<Void, Never>?
     private var linkWatchTask: Task<Void, Never>?
     private var wantsConnection = false
     private var reconnectAttempt = 0
@@ -1456,8 +1457,16 @@ public final class ClientViewModel: ObservableObject {
                 DiagnosticJournal.shared.mergeSharedLogIntoUI(enqueuePending: true)
                 logs = DiagnosticJournal.shared.recentUILines()
                 await packetTunnelManager.stop()
-                await uploadLogsToServer()
+                // Detached: tapping Connect again cancels startTask and was
+                // aborting the failure upload mid-flight ("cancelled").
+                scheduleDiagnosticUpload()
             }
+        }
+    }
+
+    private func scheduleDiagnosticUpload() {
+        logUploadTask = Task.detached { [weak self] in
+            await self?.uploadLogsToServer()
         }
     }
 

@@ -101,9 +101,7 @@ public struct CockneySubscriptionParser {
         if let batch = profileDTO.vp8BatchSize, batch > 0 {
             profile.vp8BatchSize = batch
         }
-        if let carrierAuthToken = normalized(profileDTO.carrierAuthToken) {
-            profile.carrierAuthToken = carrierAuthToken
-        }
+        profile.carrierAuthToken = normalized(profileDTO.carrierAuthToken) ?? ""
         if let turnEndpoint = normalized(profileDTO.turnEndpoint) {
             profile.turnEndpoint = turnEndpoint
         }
