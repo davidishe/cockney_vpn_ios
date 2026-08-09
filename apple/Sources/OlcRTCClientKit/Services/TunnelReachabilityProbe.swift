@@ -7,6 +7,7 @@ import Network
 public enum TunnelReachabilityProbe {
     private static let probeHost = "example.com"
     private static let probeAddress = "1.1.1.1"
+    private static let mapDNSAddress = "198.18.0.2"
 
     /// Streams each result as it lands so a journal uploaded mid-probe still carries
     /// the steps that already finished.
@@ -14,6 +15,9 @@ public enum TunnelReachabilityProbe {
         AsyncStream { continuation in
             Task {
                 continuation.yield(await pathSnapshot())
+                continuation.yield(routeLine(to: probeAddress))
+                continuation.yield(routeLine(to: mapDNSAddress))
+                continuation.yield(directDNSLine())
 
                 let resolved = resolveIPv4(host: probeHost)
                 continuation.yield("probe dns \(probeHost) -> [\(resolved.joined(separator: " "))]")
@@ -58,6 +62,125 @@ public enum TunnelReachabilityProbe {
             }
         }
         return "probe path \(description)"
+    }
+
+    /// Connecting a UDP socket performs a route lookup without sending anything, so
+    /// the chosen source address names the interface the kernel picked.
+    private static func routeLine(to address: String) -> String {
+        let fd = socket(AF_INET, SOCK_DGRAM, 0)
+        guard fd >= 0 else { return "probe route \(address) socket errno=\(errno)" }
+        defer { close(fd) }
+
+        var remote = sockaddr_in()
+        remote.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        remote.sin_family = sa_family_t(AF_INET)
+        remote.sin_port = UInt16(53).bigEndian
+        guard inet_pton(AF_INET, address, &remote.sin_addr) == 1 else {
+            return "probe route \(address) bad address"
+        }
+
+        var status: Int32 = -1
+        withUnsafePointer(to: &remote) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                status = Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        if status != 0 {
+            let code = errno
+            return "probe route \(address) errno=\(code) (\(String(cString: strerror(code))))"
+        }
+
+        var local = sockaddr_in()
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        withUnsafeMutablePointer(to: &local) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                _ = getsockname(fd, $0, &length)
+            }
+        }
+        var text = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+        inet_ntop(AF_INET, &local.sin_addr, &text, socklen_t(INET_ADDRSTRLEN))
+        return "probe route \(address) src=\(String(cString: text))"
+    }
+
+    /// The system resolver hides what came back. Query the tunnel's DNS directly to
+    /// see the address mapped DNS actually hands out.
+    private static func directDNSLine() -> String {
+        let query: [UInt8] = dnsQuery(for: probeHost)
+        let fd = socket(AF_INET, SOCK_DGRAM, 0)
+        guard fd >= 0 else { return "probe dns-direct socket errno=\(errno)" }
+        defer { close(fd) }
+
+        var timeout = timeval(tv_sec: 3, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+
+        var remote = sockaddr_in()
+        remote.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        remote.sin_family = sa_family_t(AF_INET)
+        remote.sin_port = UInt16(53).bigEndian
+        _ = inet_pton(AF_INET, mapDNSAddress, &remote.sin_addr)
+
+        var sent = -1
+        withUnsafePointer(to: &remote) { addr in
+            addr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                sent = query.withUnsafeBytes {
+                    sendto(fd, $0.baseAddress, query.count, 0, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+        }
+        if sent < 0 {
+            let code = errno
+            return "probe dns-direct send errno=\(code) (\(String(cString: strerror(code))))"
+        }
+
+        var buffer = [UInt8](repeating: 0, count: 512)
+        let received = recv(fd, &buffer, buffer.count, 0)
+        if received < 0 {
+            let code = errno
+            return "probe dns-direct recv errno=\(code) (\(String(cString: strerror(code))))"
+        }
+
+        let answers = dnsAnswers(in: Array(buffer.prefix(received)))
+        return "probe dns-direct \(probeHost) bytes=\(received) answers=[\(answers.joined(separator: " "))]"
+    }
+
+    private static func dnsQuery(for host: String) -> [UInt8] {
+        var packet: [UInt8] = [0x2b, 0xad, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0]
+        for label in host.split(separator: ".") {
+            packet.append(UInt8(label.utf8.count))
+            packet.append(contentsOf: Array(label.utf8))
+        }
+        packet.append(contentsOf: [0, 0, 1, 0, 1])
+        return packet
+    }
+
+    /// Minimal A-record scan: walk past the question, then read each answer's rdata.
+    private static func dnsAnswers(in packet: [UInt8]) -> [String] {
+        guard packet.count > 12 else { return [] }
+        let answerCount = Int(packet[6]) << 8 | Int(packet[7])
+        guard answerCount > 0 else { return [] }
+
+        var cursor = 12
+        while cursor < packet.count, packet[cursor] != 0 {
+            cursor += Int(packet[cursor]) + 1
+        }
+        cursor += 5
+
+        var out: [String] = []
+        for _ in 0..<answerCount {
+            guard cursor + 12 <= packet.count else { break }
+            cursor += (packet[cursor] & 0xC0) == 0xC0 ? 2 : 1
+            let type = Int(packet[cursor]) << 8 | Int(packet[cursor + 1])
+            let rdLength = Int(packet[cursor + 8]) << 8 | Int(packet[cursor + 9])
+            cursor += 10
+            guard cursor + rdLength <= packet.count else { break }
+            if type == 1, rdLength == 4 {
+                out.append(packet[cursor..<(cursor + 4)].map(String.init).joined(separator: "."))
+            } else {
+                out.append("type\(type)")
+            }
+            cursor += rdLength
+        }
+        return out
     }
 
     private static func resolveIPv4(host: String) -> [String] {
