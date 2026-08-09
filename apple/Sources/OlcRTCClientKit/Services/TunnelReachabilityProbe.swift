@@ -5,26 +5,25 @@ import Network
 /// from its own tunnel, so a probe running there proves nothing about app traffic;
 /// this one goes through the same path Safari does.
 public enum TunnelReachabilityProbe {
-    public struct Result: Sendable {
-        public var lines: [String]
-    }
-
     private static let probeHost = "example.com"
     private static let probeAddress = "1.1.1.1"
 
-    public static func run() async -> Result {
-        var lines: [String] = []
+    /// Streams each result as it lands so a journal uploaded mid-probe still carries
+    /// the steps that already finished.
+    public static func stream() -> AsyncStream<String> {
+        AsyncStream { continuation in
+            Task {
+                let resolved = resolveIPv4(host: probeHost)
+                continuation.yield("probe dns \(probeHost) -> [\(resolved.joined(separator: " "))]")
 
-        let resolved = resolveIPv4(host: probeHost)
-        lines.append("probe dns \(probeHost) -> [\(resolved.joined(separator: " "))]")
-
-        lines.append(await connectLine(to: .init(probeAddress), label: probeAddress))
-        if let first = resolved.first {
-            lines.append(await connectLine(to: .init(first), label: "\(probeHost)/\(first)"))
+                continuation.yield(await connectLine(to: .init(probeAddress), label: probeAddress))
+                if let first = resolved.first {
+                    continuation.yield(await connectLine(to: .init(first), label: "\(probeHost)/\(first)"))
+                }
+                continuation.yield(await connectLine(to: .init(probeHost), label: "\(probeHost) by name"))
+                continuation.finish()
+            }
         }
-        lines.append(await connectLine(to: .init(probeHost), label: "\(probeHost) by name"))
-
-        return Result(lines: lines)
     }
 
     private static func resolveIPv4(host: String) -> [String] {
@@ -64,7 +63,7 @@ public enum TunnelReachabilityProbe {
 
     private static func connectLine(to host: NWEndpoint.Host, label: String) async -> String {
         let start = Date()
-        let outcome = await connect(to: host, port: 80, timeout: 8)
+        let outcome = await connect(to: host, port: 80, timeout: 5)
         let elapsed = Int(Date().timeIntervalSince(start) * 1000)
         return "probe tcp \(label):80 \(outcome) in \(elapsed)ms"
     }

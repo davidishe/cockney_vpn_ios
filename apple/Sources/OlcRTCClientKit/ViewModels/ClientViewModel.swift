@@ -1366,11 +1366,10 @@ public final class ClientViewModel: ObservableObject {
     /// Runs from the app, not the extension, so the result reflects what Safari sees.
     private func runTunnelReachabilityProbe() async {
         appendLog("checkpoint: probe starting", level: .checkpoint)
-        let result = await TunnelReachabilityProbe.run()
-        for line in result.lines {
+        for await line in TunnelReachabilityProbe.stream() {
             appendLog("checkpoint: \(line)", level: .checkpoint)
+            logs = DiagnosticJournal.shared.recentUILines()
         }
-        logs = DiagnosticJournal.shared.recentUILines()
     }
 
     private func beginDiagnosticSession(for profile: ConnectionProfile, mode: String) {
