@@ -556,6 +556,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         let rtfUp: Int32 = 0x1
         let rtaDst: Int32 = 0x1
         let rtaGateway: Int32 = 0x2
+        // A route carrying REJECT answers sends with EHOSTUNREACH while still
+        // resolving during lookup, and BLACKHOLE swallows them outright.
+        let namedFlags: [(Int32, String)] = [
+            (0x8, "gateway"), (0x4, "host"), (0x8 << 5, "reject"),
+            (0x1000, "blackhole"), (0x100000, "ifscope"), (0x2000000, "global"),
+        ]
 
         var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_DUMP, 0]
         var needed = 0
@@ -610,7 +616,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 let name = if_indextoname(UInt32(header.index), &ifName) != nil
                     ? String(cString: ifName)
                     : "idx\(header.index)"
-                defaults.append("\(name)->\(gateway)")
+                let decoded = namedFlags
+                    .filter { header.flags & $0.0 != 0 }
+                    .map(\.1)
+                    .joined(separator: "|")
+                defaults.append(
+                    "\(name)->\(gateway)"
+                        + String(format: "(0x%x%@)", header.flags, decoded.isEmpty ? "" : " " + decoded)
+                )
             }
         }
 

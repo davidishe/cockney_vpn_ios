@@ -99,7 +99,15 @@ public enum TunnelReachabilityProbe {
         }
         var text = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
         inet_ntop(AF_INET, &local.sin_addr, &text, socklen_t(INET_ADDRSTRLEN))
-        return "probe route \(address) src=\(String(cString: text))"
+
+        // Lookup succeeding says nothing about delivery: a rejecting route only
+        // shows itself once something is actually transmitted.
+        var payload: UInt8 = 0
+        let sent = Darwin.send(fd, &payload, 1, 0)
+        let delivery = sent < 0
+            ? "send errno=\(errno) (\(String(cString: strerror(errno))))"
+            : "send=ok"
+        return "probe route \(address) src=\(String(cString: text)) \(delivery)"
     }
 
     /// The system resolver hides what came back. Query the tunnel's DNS directly to

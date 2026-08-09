@@ -140,7 +140,10 @@ public final class PacketTunnelManager {
         // iOS lumps in with the local networks it diverts to the physical interface.
         // Excluding them strands every address the resolver hands out.
         tunnelProtocol.excludeLocalNetworks = false
-        tunnelProtocol.enforceRoutes = true
+        // The tunnel already claims the default route, so enforcement buys nothing
+        // and makes iOS install reject routes that fail sends with EHOSTUNREACH
+        // even though the route lookup resolves to the tunnel.
+        tunnelProtocol.enforceRoutes = false
 
         manager.localizedDescription = localizedDescription
         manager.protocolConfiguration = tunnelProtocol
