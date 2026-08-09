@@ -13,6 +13,8 @@ public enum TunnelReachabilityProbe {
     public static func stream() -> AsyncStream<String> {
         AsyncStream { continuation in
             Task {
+                continuation.yield(await pathSnapshot())
+
                 let resolved = resolveIPv4(host: probeHost)
                 continuation.yield("probe dns \(probeHost) -> [\(resolved.joined(separator: " "))]")
 
@@ -24,6 +26,38 @@ public enum TunnelReachabilityProbe {
                 continuation.finish()
             }
         }
+    }
+
+    /// ENETDOWN means the system found no viable path, so ask the system why.
+    private static func pathSnapshot() async -> String {
+        let monitor = NWPathMonitor()
+        let box = OutcomeBox()
+
+        let description: String = await withCheckedContinuation { continuation in
+            let finish: @Sendable (String) -> Void = { text in
+                guard box.claim() else { return }
+                monitor.cancel()
+                continuation.resume(returning: text)
+            }
+
+            monitor.pathUpdateHandler = { path in
+                let interfaces = path.availableInterfaces
+                    .map { "\($0.name)/\($0.type)" }
+                    .joined(separator: " ")
+                var text = "status=\(path.status)"
+                if #available(iOS 14.2, macOS 11.0, *) {
+                    text += " unsatisfiedReason=\(path.unsatisfiedReason)"
+                }
+                text += " ipv4=\(path.supportsIPv4) ipv6=\(path.supportsIPv6)"
+                text += " interfaces=[\(interfaces)]"
+                finish(text)
+            }
+            monitor.start(queue: .global(qos: .userInitiated))
+            DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
+                finish("status=unknown (no path update)")
+            }
+        }
+        return "probe path \(description)"
     }
 
     private static func resolveIPv4(host: String) -> [String] {

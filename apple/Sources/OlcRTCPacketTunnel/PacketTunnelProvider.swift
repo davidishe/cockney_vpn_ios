@@ -371,8 +371,12 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 NI_NUMERICHOST
             ) == 0 else { continue }
 
-            let up = (ptr.pointee.ifa_flags & UInt32(IFF_UP)) != 0
-            entries.append("\(name)=\(String(cString: host))\(up ? "" : "(down)")")
+            // connect() returns ENETDOWN when the interface is not both UP and RUNNING.
+            var flags: [String] = []
+            if ptr.pointee.ifa_flags & UInt32(IFF_UP) == 0 { flags.append("!up") }
+            if ptr.pointee.ifa_flags & UInt32(IFF_RUNNING) == 0 { flags.append("!running") }
+            let suffix = flags.isEmpty ? "" : "(\(flags.joined(separator: ",")))"
+            entries.append("\(name)=\(String(cString: host))\(suffix)")
         }
 
         log("checkpoint: utun interfaces [\(entries.joined(separator: " "))]", level: .checkpoint)
