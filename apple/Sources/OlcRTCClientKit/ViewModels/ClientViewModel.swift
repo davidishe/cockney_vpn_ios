@@ -472,6 +472,7 @@ public final class ClientViewModel: ObservableObject {
         #else
         beginDiagnosticSession(for: profileToStart, mode: "localSocks")
         #endif
+        appendLog("checkpoint: app build \(BuildInfo.summary)", level: .checkpoint)
         appendLog(AppLocalization.format("Connecting: %@.", selectedProfileName), level: .checkpoint)
 
         startTask = Task { [weak self] in

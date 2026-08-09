@@ -58,6 +58,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 mode: "packetTunnel",
                 deviceId: "pending"
             )
+            log("checkpoint: extension build \(BuildInfo.summary)", level: .checkpoint)
             log(
                 "checkpoint: VPN extension startTunnel appGroup=\(DiagnosticJournal.isAppGroupAvailable() ? "ok" : "MISSING") path=\(DiagnosticJournal.shared.diagnosticsDirectoryPath()) startOpts=\(startKeys.sorted().joined(separator: ",")) persisted=\(persistedKeys.sorted().joined(separator: ","))",
                 level: .checkpoint
