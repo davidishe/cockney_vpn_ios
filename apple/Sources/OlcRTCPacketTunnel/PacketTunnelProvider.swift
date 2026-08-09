@@ -41,6 +41,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private var tun2socksLogTask: Task<Void, Never>?
     private var configFileURL: URL?
     private var tun2socksLogURL: URL?
+    private var tunnelInterfaceName: String?
     private var eventTask: Task<Void, Never>?
 
     override func startTunnel(
@@ -359,9 +360,66 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         log("checkpoint: utun interfaces [\(entries.joined(separator: " "))]", level: .checkpoint)
     }
 
+    /// tun2socks only counts what it managed to read off the descriptor. The kernel's
+    /// own counters for the tunnel interface say whether the packets were handed to it
+    /// in the first place, which separates a routing problem from a read problem.
+    private func tunnelInterfaceCounters() -> String {
+        var head: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&head) == 0, let first = head else { return "if=?" }
+        defer { freeifaddrs(head) }
+
+        for ptr in sequence(first: first, next: { $0.pointee.ifa_next }) {
+            let name = String(cString: ptr.pointee.ifa_name)
+            guard name.hasPrefix("utun"),
+                  ptr.pointee.ifa_addr?.pointee.sa_family == UInt8(AF_LINK),
+                  let raw = ptr.pointee.ifa_data
+            else { continue }
+            guard tunnelInterfaceName == nil || tunnelInterfaceName == name else { continue }
+
+            let data = raw.assumingMemoryBound(to: if_data.self).pointee
+            return "if=\(name) inPkts=\(data.ifi_ipackets) inBytes=\(data.ifi_ibytes)"
+                + " outPkts=\(data.ifi_opackets) outBytes=\(data.ifi_obytes)"
+                + " drops=\(data.ifi_iqdrops) errs=\(data.ifi_ierrors)/\(data.ifi_oerrors)"
+        }
+        return "if=\(tunnelInterfaceName ?? "?") missing"
+    }
+
+    /// Resolved once from the tunnel address so the counters follow a single interface
+    /// even when other utun devices come and go.
+    private func resolveTunnelInterfaceName() {
+        var head: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&head) == 0, let first = head else { return }
+        defer { freeifaddrs(head) }
+
+        for ptr in sequence(first: first, next: { $0.pointee.ifa_next }) {
+            let name = String(cString: ptr.pointee.ifa_name)
+            guard name.hasPrefix("utun"),
+                  let sa = ptr.pointee.ifa_addr,
+                  sa.pointee.sa_family == UInt8(AF_INET)
+            else { continue }
+
+            var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            guard getnameinfo(
+                sa,
+                socklen_t(sa.pointee.sa_len),
+                &host,
+                socklen_t(NI_MAXHOST),
+                nil,
+                0,
+                NI_NUMERICHOST
+            ) == 0 else { continue }
+
+            if String(cString: host) == Constants.tunnelAddress {
+                tunnelInterfaceName = name
+                return
+            }
+        }
+    }
+
     private func startTun2Socks(configuration: PacketTunnelConfiguration) async {
         logUtunDescriptors()
         logTunnelInterfaces()
+        resolveTunnelInterfaceName()
         let socksPort = await engine?.activeSocksPort ?? configuration.socksPort
         let logURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("olcrtc-tun2socks.log")
@@ -439,8 +497,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         tun2socksStatsTask = Task { [weak self] in
             while !Task.isCancelled {
                 let stats = Socks5Tunnel.stats
+                let counters = self?.tunnelInterfaceCounters() ?? "if=?"
                 self?.log(
-                    "checkpoint: tun2socks stats upPkts=\(stats.up.packets) upBytes=\(stats.up.bytes) downPkts=\(stats.down.packets) downBytes=\(stats.down.bytes)",
+                    "checkpoint: tun2socks stats upPkts=\(stats.up.packets) upBytes=\(stats.up.bytes) downPkts=\(stats.down.packets) downBytes=\(stats.down.bytes) \(counters)",
                     level: .checkpoint
                 )
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
