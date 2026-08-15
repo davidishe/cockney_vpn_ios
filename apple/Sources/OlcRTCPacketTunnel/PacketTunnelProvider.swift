@@ -19,8 +19,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         static let mapDNSAddress = "198.18.0.2"
         static let mapDNSNetwork = "198.18.0.0"
         static let mapDNSNetmask = "255.255.0.0"
-        // KCP over TURN over UDP leaves little room under a 1500-byte path.
-        static let mtu = 1360
+        // Inner utun MTU for cellular/TURN: keep below KCP MTU path budget.
+        static let mtu = 1200
     }
 
     private final class Tun2SocksLaunchState: @unchecked Sendable {
