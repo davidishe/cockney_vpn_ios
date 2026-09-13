@@ -572,6 +572,22 @@ public final class ClientViewModel: ObservableObject {
         }
     }
 
+    /// OpenFlux carries only the document URL; olcRTC key/port rules do not apply.
+    private func validateOpenFlux(profile: ConnectionProfile) -> String? {
+        let raw = profile.roomID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: raw), url.scheme == "https", url.host != nil else {
+            return "Укажите публичную https-ссылку на документ Яндекса."
+        }
+        #if os(iOS)
+        if !useSystemProxy {
+            return "OpenFlux работает только в режиме VPN."
+        }
+        return nil
+        #else
+        return "OpenFlux поддерживается только на iOS."
+        #endif
+    }
+
     private func startLinkWatchIfNeeded() {
         #if os(iOS)
         guard runningMode == .localProxy else { return }
@@ -776,7 +792,12 @@ public final class ClientViewModel: ObservableObject {
         logs = DiagnosticJournal.shared.recentUILines()
         #endif
 
-        let profile = profiles.first(where: { $0.id == selectedProfileID }) ?? draft
+        let selected = profiles.first(where: { $0.id == selectedProfileID }) ?? draft
+        // OpenFlux profiles have no Cockney token: the server ties log batches to a
+        // subscription device, so borrow credentials from any subscription profile.
+        let profile = selected.accessToken.isEmpty
+            ? (profiles.first(where: { !$0.accessToken.isEmpty }) ?? selected)
+            : selected
         guard !profile.accessToken.isEmpty else {
             logUploadErrorMessage = "Нет access token — обновите подписку."
             return
@@ -795,7 +816,9 @@ public final class ClientViewModel: ObservableObject {
         diagnosticSessionId = sessionId
         let mode: String
         #if os(iOS)
-        mode = runningMode == .packetTunnel ? "packetTunnel" : DiagnosticJournal.shared.currentMode()
+        mode = selected.carrier == .openflux
+            ? "openflux"
+            : (runningMode == .packetTunnel ? "packetTunnel" : DiagnosticJournal.shared.currentMode())
         #else
         mode = DiagnosticJournal.shared.currentMode()
         #endif
@@ -1534,6 +1557,9 @@ public final class ClientViewModel: ObservableObject {
     }
 
     private func validate(profile: ConnectionProfile) -> String? {
+        if profile.carrier == .openflux {
+            return validateOpenFlux(profile: profile)
+        }
         if profile.keyHex.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return AppLocalization.string("Enter the encryption key.")
         }

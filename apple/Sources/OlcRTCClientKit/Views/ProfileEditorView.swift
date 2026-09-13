@@ -120,12 +120,14 @@ public struct ProfileEditorView: View {
 
                 if isAdvancedExpanded {
                     ConnectionTextRow(
-                        title: profile.carrier == .jitsi ? "Room URL" : "Room ID",
+                        title: roomFieldTitle,
                         text: $profile.roomID,
                         onCommit: onCommit
                     )
 
-                    ConnectionSecureRow(title: "Ключ", text: $profile.keyHex, onCommit: onCommit)
+                    if profile.carrier != .openflux {
+                        ConnectionSecureRow(title: "Ключ", text: $profile.keyHex, onCommit: onCommit)
+                    }
 
                     switch profile.transport {
                     case .vp8channel:
@@ -188,12 +190,25 @@ public struct ProfileEditorView: View {
                             text: $profile.turnEndpoint,
                             onCommit: onCommit
                         )
+
+                    case .yandexdocs:
+                        Text("Работает только в режиме VPN. Диагностика пишется в журнал.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
         }
         .formStyle(.grouped)
         .onDisappear(perform: onCommit)
+    }
+
+    private var roomFieldTitle: String {
+        switch profile.carrier {
+        case .jitsi: "Room URL"
+        case .openflux: "URL документа"
+        default: "Room ID"
+        }
     }
 
     private var connectionHeaderRow: some View {

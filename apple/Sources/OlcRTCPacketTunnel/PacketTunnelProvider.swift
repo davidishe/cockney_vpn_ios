@@ -48,6 +48,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private var tun2socksLogURL: URL?
     private var tunnelInterfaceName: String?
     private var eventTask: Task<Void, Never>?
+    private var openFlux: OpenFluxTunnel?
 
     override func startTunnel(
         options: [String: NSObject]?,
@@ -74,6 +75,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                     providerConfiguration: persisted,
                     startOptions: options
                 )
+                if configuration.carrierName == Carrier.openflux.rawValue {
+                    try await startOpenFlux(configuration: configuration)
+                    completionHandler(nil)
+                    return
+                }
                 DiagnosticJournal.shared.configureSession(
                     sessionId: DiagnosticJournal.shared.currentSessionId() ?? UUID(),
                     mode: "packetTunnel",
@@ -122,6 +128,24 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         default:
             completionHandler?(nil)
         }
+    }
+
+    private func startOpenFlux(configuration: PacketTunnelConfiguration) async throws {
+        DiagnosticJournal.shared.configureSession(
+            sessionId: DiagnosticJournal.shared.currentSessionId() ?? UUID(),
+            mode: "openflux",
+            deviceId: "openflux"
+        )
+        var excluded: [String] = []
+        for host in controlPlaneHosts(from: configuration) {
+            excluded += await resolveIPv4Addresses(host: host)
+        }
+        let tunnel = OpenFluxTunnel(provider: self) { [weak self] message, level in
+            self?.log(message, level: level)
+        }
+        openFlux = tunnel
+        log("checkpoint: openflux start requested", level: .checkpoint)
+        try await tunnel.start(docURL: configuration.roomID, excludedHosts: excluded)
     }
 
     private func startOlcRTC(configuration: PacketTunnelConfiguration) async throws {
@@ -723,6 +747,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     private func stopRuntime() async {
+        openFlux?.stop()
+        openFlux = nil
         eventTask?.cancel()
         eventTask = nil
         tun2socksStatsTask?.cancel()

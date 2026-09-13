@@ -5,6 +5,9 @@ public enum Carrier: String, CaseIterable, Codable, Identifiable {
     case telemost
     case wbstream
     case vkcalls
+    /// Experimental: OpenFlux tunnel through a public Yandex Docs document.
+    /// roomID holds the document URL; only the iOS VPN mode is supported.
+    case openflux
 
     public var id: String { rawValue }
 
@@ -14,6 +17,7 @@ public enum Carrier: String, CaseIterable, Codable, Identifiable {
         case .telemost: "Telemost"
         case .wbstream: "WBStream"
         case .vkcalls: "VK Calls"
+        case .openflux: "OpenFlux (Яндекс Документы)"
         }
     }
 
@@ -22,6 +26,7 @@ public enum Carrier: String, CaseIterable, Codable, Identifiable {
         case .telemost: [.vp8channel, .videochannel]
         case .wbstream: [.datachannel, .vp8channel, .seichannel, .videochannel]
         case .vkcalls: [.vp8channel, .turnrelay]
+        case .openflux: [.yandexdocs]
         case .jitsi:    [.datachannel, .vp8channel, .seichannel, .videochannel]
         }
     }
@@ -33,6 +38,7 @@ public enum Transport: String, CaseIterable, Codable, Identifiable {
     case seichannel
     case videochannel
     case turnrelay
+    case yandexdocs
 
     public var id: String { rawValue }
 
@@ -43,6 +49,7 @@ public enum Transport: String, CaseIterable, Codable, Identifiable {
         case .seichannel: "seichannel"
         case .videochannel: "videochannel"
         case .turnrelay: "turnrelay"
+        case .yandexdocs: "yandex docs"
         }
     }
 }
