@@ -135,3 +135,19 @@ xcodebuild ... -configuration Debug COCKNEY_DIAGNOSTICS_DEV_KEY="$(tr -d '[:spac
 `#if DEBUG`: даже если передать ключ в Release/TestFlight-сборку, тогла там не будет.
 Серверная сторона: `OlcRtc:DiagnosticsDevUploadKey` или env
 `OLCRTC_DIAGNOSTICS_DEV_UPLOAD_KEY` на RU. Пустое значение выключает dev-выгрузку (401).
+
+### Дефект 13.09.2026: расширение убивалось по памяти
+
+Симптом: OpenFlux-режим работает несколько секунд, видео встаёт, в журнале последняя строка
+`openflux-ext: ... mem=38MB`, дальше тишина и `The iOS VPN tunnel stopped before it reported a
+connection`. Память расширения за 10 с выросла с 9 до 38 МБ, и iOS убил его по лимиту ~50 МБ.
+
+Причин две:
+- Поток `openflux.reader` крутил бесконечный цикл без `autoreleasepool`. Каждый пакет от Go
+  приходит autoreleased-объектом `NSData`, а пул потока не освобождается, пока цикл не выйдет.
+  Все принятые пакеты оставались в памяти.
+- В Go-ядре не было мягкого лимита кучи. Upstream OpenFlux ставит `SetMemoryLimit`, а при
+  переносе это потерялось. Теперь 30 МБ и `GCPercent=20`, в строке `openflux: stats` видны
+  `goheap`/`gosys`.
+
+Если `mem=` в `openflux-ext` снова уверенно ползёт к 45 МБ, первым делом проверять эти два места.

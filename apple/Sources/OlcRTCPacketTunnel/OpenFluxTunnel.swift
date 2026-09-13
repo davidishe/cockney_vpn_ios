@@ -139,9 +139,11 @@ final class OpenFluxTunnel: @unchecked Sendable {
         provider?.packetFlow.readPackets { [weak self] packets, _ in
             guard let self, self.isRunning else { return }
             var bytes = 0
-            for packet in packets {
-                bytes += packet.count
-                MobileOpenfluxWritePacket(packet)
+            autoreleasepool {
+                for packet in packets {
+                    bytes += packet.count
+                    MobileOpenfluxWritePacket(packet)
+                }
             }
             self.lock.lock()
             self.upPackets += packets.count
@@ -156,28 +158,34 @@ final class OpenFluxTunnel: @unchecked Sendable {
     private func startReader() {
         let thread = Thread { [weak self] in
             while let self, self.isRunning {
-                guard let first = MobileOpenfluxReadPacket(500) else { continue }
-                var batch = [first]
-                while batch.count < Constants.readBatch, let next = MobileOpenfluxReadPacket(0) {
-                    batch.append(next)
-                }
-                let protocols = [NSNumber](repeating: NSNumber(value: AF_INET), count: batch.count)
-                let accepted = self.provider?.packetFlow.writePackets(batch, withProtocols: protocols) ?? false
-                let bytes = batch.reduce(0) { $0 + $1.count }
-                self.lock.lock()
-                self.downPackets += batch.count
-                self.downBytes += bytes
-                self.downBatches += 1
-                self.lock.unlock()
-                if !accepted {
-                    self.log("checkpoint: openflux writePackets rejected batch=\(batch.count)", .error)
-                }
+                // Each gomobile NSData is autoreleased; a thread loop never drains its
+                // pool, so without this every packet ever received stayed in memory.
+                autoreleasepool { self.pumpToDevice() }
             }
         }
         thread.name = "openflux.reader"
         thread.qualityOfService = .userInitiated
         readerThread = thread
         thread.start()
+    }
+
+    private func pumpToDevice() {
+        guard let first = MobileOpenfluxReadPacket(500) else { return }
+        var batch = [first]
+        while batch.count < Constants.readBatch, let next = MobileOpenfluxReadPacket(0) {
+            batch.append(next)
+        }
+        let protocols = [NSNumber](repeating: NSNumber(value: AF_INET), count: batch.count)
+        let accepted = self.provider?.packetFlow.writePackets(batch, withProtocols: protocols) ?? false
+        let bytes = batch.reduce(0) { $0 + $1.count }
+        self.lock.lock()
+        self.downPackets += batch.count
+        self.downBytes += bytes
+        self.downBatches += 1
+        self.lock.unlock()
+        if !accepted {
+            self.log("checkpoint: openflux writePackets rejected batch=\(batch.count)", .error)
+        }
     }
 
     private func startStats() {
