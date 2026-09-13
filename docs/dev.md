@@ -116,3 +116,22 @@ xcodebuild -list -project apple/Godwit.xcodeproj
   с вырезанными base64 (`frame ...`).
 - `openflux-ext: ...` раз в 5 с: сколько пакетов отдал iOS и сколько принял, память
   расширения (`mem=`, лимит jetsam ~50 МБ), смена сети (`openflux path`).
+
+### Выгрузка журнала без подписки (dev-сборки)
+
+В Debug-сборке, собранной с ключом, в «Журнале» есть тогл «Выгрузка без подписки (dev)».
+Когда у выбранного профиля и всех остальных нет Cockney-токена, журнал уходит на
+`POST /api/olcrtc/diagnostics/logs` с заголовком `X-Diagnostics-Dev-Key` вместо Bearer.
+Устройство — ID установки (`diagnostics.devInstallId` в UserDefaults). На сервере режим
+получает префикс `dev:`, например `dev:openflux`.
+
+Сборка с ключом (ключ только в `CockneyVPN/secrets/cockney_diagnostics_dev_key`, в git его нет):
+
+```bash
+xcodebuild ... -configuration Debug COCKNEY_DIAGNOSTICS_DEV_KEY="$(tr -d '[:space:]' < ../../secrets/cockney_diagnostics_dev_key)" build
+```
+
+Ключ попадает в `Info.plist` (`CockneyDiagnosticsDevKey`), но Swift читает его только под
+`#if DEBUG`: даже если передать ключ в Release/TestFlight-сборку, тогла там не будет.
+Серверная сторона: `OlcRtc:DiagnosticsDevUploadKey` или env
+`OLCRTC_DIAGNOSTICS_DEV_UPLOAD_KEY` на RU. Пустое значение выключает dev-выгрузку (401).

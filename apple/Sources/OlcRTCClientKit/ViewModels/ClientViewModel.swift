@@ -47,6 +47,18 @@ public final class ClientViewModel: ObservableObject {
     @Published public var draft: ConnectionProfile
     @Published public private(set) var status: ClientStatus = .stopped
     @Published public private(set) var logs: [String] = []
+    /// Dev builds: allow journal upload without a subscription token.
+    @Published public var devUploadWithoutSubscription: Bool =
+        UserDefaults.standard.bool(forKey: "diagnostics.devUploadWithoutSubscription") {
+        didSet {
+            UserDefaults.standard.set(devUploadWithoutSubscription, forKey: "diagnostics.devUploadWithoutSubscription")
+        }
+    }
+
+    public var isDevUploadAvailable: Bool {
+        DiagnosticLogUploader.devUploadKey != nil
+    }
+
     @Published public var useSystemProxy: Bool {
         didSet {
             store.saveUseSystemProxy(useSystemProxy)
@@ -798,8 +810,11 @@ public final class ClientViewModel: ObservableObject {
         let profile = selected.accessToken.isEmpty
             ? (profiles.first(where: { !$0.accessToken.isEmpty }) ?? selected)
             : selected
-        guard !profile.accessToken.isEmpty else {
-            logUploadErrorMessage = "Нет access token — обновите подписку."
+        let devKey = devUploadWithoutSubscription ? DiagnosticLogUploader.devUploadKey : nil
+        guard !profile.accessToken.isEmpty || devKey != nil else {
+            logUploadErrorMessage = isDevUploadAvailable
+                ? "Нет access token — включите «Выгрузка без подписки (dev)» или обновите подписку."
+                : "Нет access token — обновите подписку."
             return
         }
         guard DiagnosticJournal.shared.hasContent() || DiagnosticJournal.shared.pendingCount() > 0 else {
@@ -823,7 +838,7 @@ public final class ClientViewModel: ObservableObject {
         mode = DiagnosticJournal.shared.currentMode()
         #endif
         let subscriptionURL = profile.subscription?.sourceURL.flatMap(URL.init(string:))
-        let context = DiagnosticLogUploader.makeContext(
+        var context = DiagnosticLogUploader.makeContext(
             accessToken: profile.accessToken,
             deviceId: profile.clientID.isEmpty
                 ? (DiagnosticJournal.shared.currentDeviceId().isEmpty ? "unknown" : DiagnosticJournal.shared.currentDeviceId())
@@ -832,6 +847,11 @@ public final class ClientViewModel: ObservableObject {
             mode: mode,
             subscriptionURL: subscriptionURL
         )
+        // A real subscription token wins; the dev key covers only token-less installs.
+        if profile.accessToken.isEmpty, let devKey {
+            context.devUploadKey = devKey
+            context.deviceId = DiagnosticLogUploader.devInstallId
+        }
 
         do {
             _ = try await diagnosticUploader.uploadAllPending(context: context)

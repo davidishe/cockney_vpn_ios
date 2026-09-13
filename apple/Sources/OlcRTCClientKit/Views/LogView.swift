@@ -14,6 +14,8 @@ public struct LogView: View {
     let onUpload: () -> Void
     let onRefresh: () -> Void
     let onDismissUploadError: () -> Void
+    /// Dev builds only: upload without a subscription (nil hides the toggle).
+    let devUploadWithoutSubscription: Binding<Bool>?
     #if os(iOS)
     @State private var isSharing = false
     #endif
@@ -25,7 +27,8 @@ public struct LogView: View {
         onClear: @escaping () -> Void,
         onUpload: @escaping () -> Void = {},
         onRefresh: @escaping () -> Void = {},
-        onDismissUploadError: @escaping () -> Void = {}
+        onDismissUploadError: @escaping () -> Void = {},
+        devUploadWithoutSubscription: Binding<Bool>? = nil
     ) {
         self.logs = logs
         self.isUploading = isUploading
@@ -34,6 +37,7 @@ public struct LogView: View {
         self.onUpload = onUpload
         self.onRefresh = onRefresh
         self.onDismissUploadError = onDismissUploadError
+        self.devUploadWithoutSubscription = devUploadWithoutSubscription
     }
 
     public var body: some View {
@@ -77,6 +81,13 @@ public struct LogView: View {
                 .disabled(logs.isEmpty || isUploading)
             }
             .padding([.horizontal, .top])
+
+            if let devUploadWithoutSubscription {
+                Toggle("Выгрузка без подписки (dev)", isOn: devUploadWithoutSubscription)
+                    .font(.footnote)
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+            }
 
             if let uploadErrorMessage, !uploadErrorMessage.isEmpty {
                 HStack(alignment: .top, spacing: 8) {

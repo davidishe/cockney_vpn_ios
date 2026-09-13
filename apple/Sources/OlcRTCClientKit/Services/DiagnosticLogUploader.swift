@@ -9,6 +9,8 @@ public struct DiagnosticLogUploadContext: Sendable {
     public var appVersion: String
     public var build: String
     public var platform: String
+    /// Dev builds without a subscription: sent as X-Diagnostics-Dev-Key instead of Bearer.
+    public var devUploadKey: String?
 
     public init(
         accessToken: String,
@@ -18,7 +20,8 @@ public struct DiagnosticLogUploadContext: Sendable {
         uploadURL: URL,
         appVersion: String,
         build: String,
-        platform: String
+        platform: String,
+        devUploadKey: String? = nil
     ) {
         self.accessToken = accessToken
         self.deviceId = deviceId
@@ -28,6 +31,7 @@ public struct DiagnosticLogUploadContext: Sendable {
         self.appVersion = appVersion
         self.build = build
         self.platform = platform
+        self.devUploadKey = devUploadKey
     }
 }
 
@@ -85,6 +89,29 @@ public final class DiagnosticLogUploader: @unchecked Sendable {
         return URL(string: "https://cockney.tokenova.space/api/olcrtc/diagnostics/logs")!
     }
 
+    /// Write key baked into Debug builds (Info.plist CockneyDiagnosticsDevKey from
+    /// secrets/cockney_diagnostics_dev_key). Always nil in Release/TestFlight builds.
+    public static var devUploadKey: String? {
+        #if DEBUG
+        let raw = Bundle.main.infoDictionary?["CockneyDiagnosticsDevKey"] as? String ?? ""
+        let key = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return key.isEmpty || key.hasPrefix("$(") ? nil : key
+        #else
+        return nil
+        #endif
+    }
+
+    /// Stable per-install id for dev uploads; the server has no device for it.
+    public static var devInstallId: String {
+        let storeKey = "diagnostics.devInstallId"
+        if let existing = UserDefaults.standard.string(forKey: storeKey) {
+            return existing
+        }
+        let created = UUID().uuidString
+        UserDefaults.standard.set(created, forKey: storeKey)
+        return created
+    }
+
     public static func makeContext(
         accessToken: String,
         deviceId: String,
@@ -113,7 +140,7 @@ public final class DiagnosticLogUploader: @unchecked Sendable {
 
     /// Drain and POST all pending batches. Does not append checkpoints into the journal.
     public func uploadAllPending(context: DiagnosticLogUploadContext) async throws -> Int {
-        guard !context.accessToken.isEmpty else {
+        guard !context.accessToken.isEmpty || context.devUploadKey != nil else {
             throw DiagnosticLogUploaderError.emptyToken
         }
         journal.prepareForUpload()
@@ -170,7 +197,11 @@ public final class DiagnosticLogUploader: @unchecked Sendable {
         var request = URLRequest(url: context.uploadURL)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(context.accessToken)", forHTTPHeaderField: "Authorization")
+        if let devKey = context.devUploadKey {
+            request.setValue(devKey, forHTTPHeaderField: "X-Diagnostics-Dev-Key")
+        } else {
+            request.setValue("Bearer \(context.accessToken)", forHTTPHeaderField: "Authorization")
+        }
         request.httpBody = data
         request.timeoutInterval = 30
 

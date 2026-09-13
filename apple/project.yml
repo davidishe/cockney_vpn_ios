@@ -26,6 +26,8 @@ targets:
       path: Sources/OlcRTCClientiOS/Info.plist
       properties:
         CFBundleDisplayName: Cockney
+        # Debug-only journal upload key; empty unless passed to xcodebuild.
+        CockneyDiagnosticsDevKey: $(COCKNEY_DIAGNOSTICS_DEV_KEY)
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false
@@ -49,6 +51,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: space.tokenova.cockney.ios
         PRODUCT_NAME: Cockney
+        # Filled only by dev builds on the command line; Swift reads it under #if DEBUG,
+        # so a key passed to a Release/TestFlight build is still ignored.
+        COCKNEY_DIAGNOSTICS_DEV_KEY: ""
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: Sources/OlcRTCClientiOS/OlcRTCClientiOS.entitlements
   OlcRTCPacketTunnel:

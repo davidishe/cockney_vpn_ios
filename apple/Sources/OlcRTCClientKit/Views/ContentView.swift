@@ -1618,7 +1618,10 @@ private struct LogScreen: View {
                     Task { await viewModel.uploadLogsToServer() }
                 },
                 onRefresh: { viewModel.refreshDiagnosticLogs() },
-                onDismissUploadError: { viewModel.clearLogUploadError() }
+                onDismissUploadError: { viewModel.clearLogUploadError() },
+                devUploadWithoutSubscription: viewModel.isDevUploadAvailable
+                    ? $viewModel.devUploadWithoutSubscription
+                    : nil
             )
                 .navigationTitle("Журнал")
                 #if os(iOS)
